@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onBeforeUnmount, ref } from "vue";
+import { computed, onBeforeUnmount, ref, shallowRef } from "vue";
 import { engines, imageFromSource, runPipeline } from "./pipeline/index.js";
 import { musicXmlToMidi, renderMusicXml } from "./render/verovio.js";
 
@@ -16,9 +16,10 @@ const staffCount = ref(0);
 const cameraActive = ref(false);
 const videoEl = ref(null);
 let cameraStream = null;
-let sourceImage = null; // { data, width, height }
+// shallowRef: reactivity on assignment only — the pixel buffer stays raw
+const sourceImage = shallowRef(null); // { data, width, height }
 
-const canRun = computed(() => sourceImage !== null && !running.value);
+const canRun = computed(() => sourceImage.value !== null && !running.value);
 
 function resetResult() {
 	error.value = null;
@@ -34,7 +35,7 @@ async function onFileChange(event) {
 	stopCamera();
 	resetResult();
 	const bitmap = await createImageBitmap(file);
-	sourceImage = imageFromSource(bitmap, bitmap.width, bitmap.height);
+	sourceImage.value = imageFromSource(bitmap, bitmap.width, bitmap.height);
 	if (previewUrl.value) {
 		URL.revokeObjectURL(previewUrl.value);
 	}
@@ -65,7 +66,11 @@ function capturePhoto() {
 	if (!video || video.videoWidth === 0) {
 		return;
 	}
-	sourceImage = imageFromSource(video, video.videoWidth, video.videoHeight);
+	sourceImage.value = imageFromSource(
+		video,
+		video.videoWidth,
+		video.videoHeight,
+	);
 	const canvas = document.createElement("canvas");
 	canvas.width = video.videoWidth;
 	canvas.height = video.videoHeight;
@@ -90,14 +95,14 @@ function stopCamera() {
 onBeforeUnmount(stopCamera);
 
 async function run() {
-	if (!sourceImage) {
+	if (!sourceImage.value) {
 		return;
 	}
 	running.value = true;
 	resetResult();
 	progress.value = { stage: "starting", ratio: 0 };
 	try {
-		const result = await runPipeline(engineId.value, sourceImage, {
+		const result = await runPipeline(engineId.value, sourceImage.value, {
 			onProgress: (p) => {
 				progress.value = p;
 			},

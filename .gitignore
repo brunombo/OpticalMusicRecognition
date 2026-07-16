@@ -16,3 +16,4 @@ public/ort/
 
 # Editor/OS noise
 .DS_Store
+out/

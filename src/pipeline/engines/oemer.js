@@ -41,7 +41,10 @@ async function loadOrt() {
 async function getSession(model) {
 	if (!sessions[model.url]) {
 		const rt = await loadOrt();
-		const providers = navigator.gpu ? ["webgpu", "wasm"] : ["wasm"];
+		const providers =
+			typeof navigator !== "undefined" && navigator.gpu
+				? ["webgpu", "wasm"]
+				: ["wasm"];
 		sessions[model.url] = await rt.InferenceSession.create(model.url, {
 			executionProviders: providers,
 		});
