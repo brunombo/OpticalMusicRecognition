@@ -1,0 +1,157 @@
+:root {
+	--bg: #f7f6f3;
+	--panel: #ffffff;
+	--ink: #21201c;
+	--muted: #6f6d66;
+	--accent: #4a5d8f;
+	--accent-ink: #ffffff;
+	--border: #e2e0da;
+	font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+	:root {
+		--bg: #191919;
+		--panel: #222222;
+		--ink: #ececec;
+		--muted: #a0a0a0;
+		--accent: #8fa3d4;
+		--accent-ink: #10131c;
+		--border: #333333;
+	}
+}
+
+* {
+	box-sizing: border-box;
+}
+
+body {
+	margin: 0;
+	background: var(--bg);
+	color: var(--ink);
+}
+
+.app {
+	max-width: 960px;
+	margin: 0 auto;
+	padding: 1.5rem 1rem 4rem;
+}
+
+.app > header h1 {
+	margin: 0 0 0.25rem;
+	font-size: 1.6rem;
+}
+
+.app > header p {
+	margin: 0 0 1.5rem;
+	color: var(--muted);
+}
+
+.panel {
+	background: var(--panel);
+	border: 1px solid var(--border);
+	border-radius: 10px;
+	padding: 1rem;
+	margin-bottom: 1rem;
+}
+
+.panel h2 {
+	margin: 0 0 0.75rem;
+	font-size: 1.05rem;
+}
+
+.row {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.75rem;
+	align-items: center;
+}
+
+button,
+.file-label {
+	background: var(--accent);
+	color: var(--accent-ink);
+	border: none;
+	border-radius: 8px;
+	padding: 0.55rem 1rem;
+	font-size: 0.95rem;
+	cursor: pointer;
+}
+
+button:disabled {
+	opacity: 0.45;
+	cursor: not-allowed;
+}
+
+button.secondary {
+	background: transparent;
+	color: var(--ink);
+	border: 1px solid var(--border);
+}
+
+select {
+	background: var(--panel);
+	color: var(--ink);
+	border: 1px solid var(--border);
+	border-radius: 8px;
+	padding: 0.5rem;
+	font-size: 0.95rem;
+}
+
+input[type="file"] {
+	display: none;
+}
+
+.preview {
+	max-width: 100%;
+	max-height: 320px;
+	border: 1px solid var(--border);
+	border-radius: 6px;
+}
+
+.progress {
+	height: 8px;
+	background: var(--border);
+	border-radius: 4px;
+	overflow: hidden;
+	margin-top: 0.75rem;
+}
+
+.progress > div {
+	height: 100%;
+	background: var(--accent);
+	transition: width 0.2s;
+}
+
+.progress-label {
+	color: var(--muted);
+	font-size: 0.85rem;
+	margin-top: 0.3rem;
+}
+
+.score-view {
+	overflow-x: auto;
+	background: white;
+	border-radius: 6px;
+	padding: 0.5rem;
+}
+
+.score-view svg {
+	max-width: 100%;
+	height: auto;
+}
+
+.error {
+	color: #b3372f;
+	margin-top: 0.5rem;
+}
+
+.hint {
+	color: var(--muted);
+	font-size: 0.9rem;
+}
+
+video {
+	max-width: 100%;
+	border-radius: 6px;
+}

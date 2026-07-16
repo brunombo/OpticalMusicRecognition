@@ -1,0 +1,18 @@
+# Dependencies and build output
+node_modules/
+dist/
+
+# Model files (fetched via `npm run fetch:models`)
+public/models/*.onnx
+
+# ONNX Runtime assets (copied from node_modules via `npm run copy:ort`)
+public/ort/
+
+# Compiled / generated files
+*.pyc
+*.toc
+*.log
+*.tmp
+
+# Editor/OS noise
+.DS_Store

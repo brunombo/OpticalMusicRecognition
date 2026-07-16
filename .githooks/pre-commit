@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Fast checks before every commit: formatting/lint + unit tests (<1 min).
+set -e
+
+cd "$(git rev-parse --show-toplevel)"
+
+echo "pre-commit: biome check"
+npx biome check .
+
+echo "pre-commit: vitest"
+npx vitest run --silent
+
+echo "pre-commit: OK"

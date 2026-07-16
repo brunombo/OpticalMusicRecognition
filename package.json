@@ -1,0 +1,29 @@
+{
+	"name": "music-ocr",
+	"version": "0.2.0",
+	"description": "Fully client-side Optical Music Recognition web app (oemer ONNX models + Verovio rendering)",
+	"type": "module",
+	"license": "MIT",
+	"scripts": {
+		"dev": "npm run copy:ort && vite",
+		"build": "npm run copy:ort && vite build",
+		"preview": "vite preview",
+		"copy:ort": "node scripts/copy-ort-assets.mjs",
+		"fetch:models": "bash scripts/fetch-models.sh",
+		"test": "vitest run",
+		"test:watch": "vitest",
+		"lint": "biome check .",
+		"lint:fix": "biome check --write ."
+	},
+	"dependencies": {
+		"onnxruntime-web": "^1.22.0",
+		"verovio": "^6.2.0",
+		"vue": "^3.5.0"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "^2.0.0",
+		"@vitejs/plugin-vue": "^5.2.4",
+		"vite": "^5.4.21",
+		"vitest": "^3.2.0"
+	}
+}
