@@ -21,6 +21,10 @@ export default defineConfig({
 	optimizeDeps: {
 		exclude: ["onnxruntime-web"],
 	},
+	// Our recognition worker uses dynamic imports → must be an ES module
+	worker: {
+		format: "es",
+	},
 	test: {
 		environment: "node",
 		include: ["tests/**/*.test.js"],

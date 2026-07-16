@@ -10,6 +10,7 @@ import {
 	componentsToNotes,
 	connectedComponents,
 	detectStaves,
+	estimateSkew,
 } from "../src/pipeline/analysis.js";
 import { classicalEngine } from "../src/pipeline/engines/classical.js";
 import { buildMusicXml } from "../src/pipeline/musicxml.js";
@@ -141,9 +142,13 @@ for (let i = 0; i < staffSymbolMap.length; i++) {
 saveMask("mask-staff", staffMask);
 saveMask("mask-notehead", noteheadMask);
 
-const staves = detectStaves(staffMask, width, height);
+const skewTan = estimateSkew(staffMask, width, height);
+console.log(
+	`estimated skew: ${((Math.atan(skewTan) * 180) / Math.PI).toFixed(2)} deg`,
+);
+const staves = detectStaves(staffMask, width, height, skewTan);
 const components = connectedComponents(noteheadMask, width, height);
-const notes = componentsToNotes(components, staves);
+const notes = componentsToNotes(components, staves, skewTan);
 const oemerScore = { staves, notes };
 report("oemer", oemerScore);
 console.log(`notehead components (pre-filter): ${components.length}`);

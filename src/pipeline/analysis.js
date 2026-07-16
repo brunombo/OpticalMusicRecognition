@@ -3,40 +3,89 @@
 // Used by both the classical (no-ML) engine and the oemer reconstruction.
 
 /**
+ * Estimate the global rotation of staff lines in a binary map, as
+ * tan(angle). Photos are rarely perfectly straight, and even 1° of tilt
+ * smears a page-wide projection profile beyond use. Tries candidate
+ * slopes and keeps the one whose skew-corrected profile is sharpest.
+ */
+export function estimateSkew(mask, width, height, maxTan = 0.05, steps = 51) {
+	// Collect (sampled) ink coordinates once
+	const xs = [];
+	const ys = [];
+	for (let y = 0; y < height; y++) {
+		const row = y * width;
+		for (let x = 0; x < width; x += 2) {
+			if (mask[row + x] === 1) {
+				xs.push(x);
+				ys.push(y);
+			}
+		}
+	}
+	if (xs.length === 0) {
+		return 0;
+	}
+	const pad = Math.ceil(width * maxTan);
+	const hist = new Float64Array(height + 2 * pad);
+	let bestTan = 0;
+	let bestScore = -1;
+	for (let s = 0; s < steps; s++) {
+		const tan = -maxTan + (2 * maxTan * s) / (steps - 1);
+		hist.fill(0);
+		for (let i = 0; i < xs.length; i++) {
+			hist[Math.round(ys[i] - xs[i] * tan) + pad]++;
+		}
+		// Sharpness: sum of squares is maximal when mass concentrates in few bins
+		let score = 0;
+		for (let i = 0; i < hist.length; i++) {
+			score += hist[i] * hist[i];
+		}
+		if (score > bestScore) {
+			bestScore = score;
+			bestTan = tan;
+		}
+	}
+	return bestTan;
+}
+
+/**
  * Detect staff lines from a binary map (1 = staff-line pixel) using a
- * horizontal projection profile, then group them into 5-line staves.
+ * skew-corrected projection profile, then group them into 5-line staves.
+ * All returned line positions live in skew-corrected space
+ * (y' = y − x·skewTan); compare against them with the same transform.
  *
  * Returns [{ lineYs: [y0..y4], top, bottom, unitSize }] sorted top→bottom.
  */
-export function detectStaves(staffMap, width, height) {
-	// Row projection
-	const profile = new Float64Array(height);
+export function detectStaves(staffMap, width, height, skewTan = 0) {
+	const pad = Math.ceil(width * Math.abs(skewTan));
+	const size = height + 2 * pad;
+	const profile = new Float64Array(size);
 	for (let y = 0; y < height; y++) {
-		let n = 0;
 		const row = y * width;
 		for (let x = 0; x < width; x++) {
-			n += staffMap[row + x];
+			if (staffMap[row + x] === 1) {
+				profile[Math.round(y - x * skewTan) + pad]++;
+			}
 		}
-		profile[y] = n;
 	}
 	// A row belongs to a staff line if it has substantially more staff pixels
 	// than the page average.
 	let mean = 0;
-	for (let y = 0; y < height; y++) {
-		mean += profile[y];
+	for (let i = 0; i < size; i++) {
+		mean += profile[i];
 	}
-	mean /= height;
+	mean /= size;
 	const threshold = Math.max(mean * 2, width * 0.2);
 
-	// Collapse consecutive hot rows into line centers
+	// Collapse consecutive hot rows into line centers (back in y'-space,
+	// i.e. padded index minus pad)
 	const lines = [];
 	let runStart = -1;
-	for (let y = 0; y <= height; y++) {
-		const hot = y < height && profile[y] >= threshold;
+	for (let i = 0; i <= size; i++) {
+		const hot = i < size && profile[i] >= threshold;
 		if (hot && runStart < 0) {
-			runStart = y;
+			runStart = i;
 		} else if (!hot && runStart >= 0) {
-			lines.push((runStart + y - 1) / 2);
+			lines.push((runStart + i - 1) / 2 - pad);
 			runStart = -1;
 		}
 	}
@@ -63,6 +112,16 @@ export function detectStaves(staffMap, width, height) {
 	}
 	if (group.length === 5) {
 		staves.push(makeStaff(group));
+	}
+
+	// Unit-consistency filter: real staves on one page share a line spacing;
+	// texture/text areas produce "staves" with wildly different units.
+	if (staves.length >= 2) {
+		const units = staves.map((s) => s.unitSize).sort((a, b) => a - b);
+		const median = units[Math.floor(units.length / 2)];
+		return staves.filter(
+			(s) => s.unitSize >= median * 0.6 && s.unitSize <= median * 1.6,
+		);
 	}
 	return staves;
 }
@@ -179,20 +238,23 @@ export function pitchFromY(y, staff) {
 
 /**
  * Filter notehead-candidate components by size relative to the staff unit,
- * assign each to the nearest staff, and compute its pitch.
+ * assign each to the nearest staff, and compute its pitch. `skewTan` must
+ * be the value used for detectStaves — staff geometry lives in
+ * skew-corrected space (y' = y − x·skewTan).
  * Returns notes sorted by staff, then left→right.
  */
-export function componentsToNotes(components, staves) {
+export function componentsToNotes(components, staves, skewTan = 0) {
 	if (staves.length === 0) {
 		return [];
 	}
 	const notes = [];
 	for (const c of components) {
+		const cy = c.cy - c.cx * skewTan; // skew-corrected center
 		// Nearest staff by vertical distance to the staff's middle line
 		let staffIndex = 0;
 		let bestDistance = Number.POSITIVE_INFINITY;
 		for (let s = 0; s < staves.length; s++) {
-			const d = Math.abs(c.cy - staves[s].lineYs[2]);
+			const d = Math.abs(cy - staves[s].lineYs[2]);
 			if (d < bestDistance) {
 				bestDistance = d;
 				staffIndex = s;
@@ -210,12 +272,11 @@ export function componentsToNotes(components, staves) {
 			h <= unit * 1.8 &&
 			c.area >= unit * unit * 0.25;
 		// Ignore blobs far outside the staff (beyond 4 ledger lines)
-		const inRange =
-			c.cy > staff.top - 4 * unit && c.cy < staff.bottom + 4 * unit;
+		const inRange = cy > staff.top - 4 * unit && cy < staff.bottom + 4 * unit;
 		if (!sizeOk || !inRange) {
 			continue;
 		}
-		const pitch = pitchFromY(c.cy, staff);
+		const pitch = pitchFromY(cy, staff);
 		notes.push({
 			staff: staffIndex,
 			x: c.cx,

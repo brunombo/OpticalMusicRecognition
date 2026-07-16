@@ -7,22 +7,29 @@ import {
 } from "../src/pipeline/preprocess.js";
 
 describe("targetSize", () => {
-	it("keeps images already in the 3-4.35 Mpx window", () => {
-		const r = targetSize(2000, 1750); // 3.5 Mpx
-		expect(r.width).toBe(2000);
-		expect(r.height).toBe(1750);
+	it("keeps images already inside the pixel budget", () => {
+		const r = targetSize(1600, 1250); // 2.0 Mpx
+		expect(r.width).toBe(1600);
+		expect(r.height).toBe(1250);
 		expect(r.scale).toBe(1);
 	});
 
-	it("upscales small images into the window", () => {
+	it("upscales small images into the budget window", () => {
 		const r = targetSize(800, 600);
 		const pixels = r.width * r.height;
-		expect(pixels).toBeGreaterThan(3_000_000);
-		expect(pixels).toBeLessThan(4_350_000);
+		expect(pixels).toBeGreaterThan(1_800_000);
+		expect(pixels).toBeLessThan(2_600_000);
 	});
 
-	it("downscales huge images into the window", () => {
+	it("downscales huge phone photos into the budget window", () => {
 		const r = targetSize(6000, 4000);
+		const pixels = r.width * r.height;
+		expect(pixels).toBeGreaterThan(1_800_000);
+		expect(pixels).toBeLessThan(2_600_000);
+	});
+
+	it("honors a custom budget", () => {
+		const r = targetSize(6000, 4000, { low: 3_000_000, high: 4_350_000 });
 		const pixels = r.width * r.height;
 		expect(pixels).toBeGreaterThan(3_000_000);
 		expect(pixels).toBeLessThan(4_350_000);

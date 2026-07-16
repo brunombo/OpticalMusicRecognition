@@ -3,6 +3,7 @@ import {
 	componentsToNotes,
 	connectedComponents,
 	detectStaves,
+	estimateSkew,
 	pitchFromY,
 } from "../src/pipeline/analysis.js";
 
@@ -45,6 +46,70 @@ describe("detectStaves", () => {
 		const staves = detectStaves(map, width, height);
 		expect(staves.length).toBe(2);
 		expect(staves[0].top).toBeLessThan(staves[1].top);
+	});
+});
+
+describe("estimateSkew + skewed staves", () => {
+	/** Staff with 5 lines drawn at slope `tan` (y = baseY + line*12 + x*tan). */
+	function rotatedStaff(width, height, tan) {
+		const map = new Uint8Array(width * height);
+		for (let line = 0; line < 5; line++) {
+			for (let x = 0; x < width; x++) {
+				const y = Math.round(80 + line * 12 + x * tan);
+				if (y >= 0 && y < height) {
+					map[y * width + x] = 1;
+				}
+			}
+		}
+		return map;
+	}
+
+	it("recovers the rotation angle of tilted staff lines", () => {
+		const width = 800;
+		const height = 300;
+		const tan = 0.02; // ≈1.15°
+		const map = rotatedStaff(width, height, tan);
+		const estimated = estimateSkew(map, width, height);
+		expect(estimated).toBeCloseTo(tan, 2);
+	});
+
+	it("detects a tilted staff once skew is corrected", () => {
+		const width = 800;
+		const height = 300;
+		const tan = 0.02;
+		const map = rotatedStaff(width, height, tan);
+		// Without correction the projection is smeared: 16 px drift over
+		// 800 px width exceeds the 12 px line spacing
+		expect(detectStaves(map, width, height).length).toBe(0);
+		const staves = detectStaves(map, width, height, tan);
+		expect(staves.length).toBe(1);
+		expect(staves[0].unitSize).toBeCloseTo(12, 0);
+	});
+
+	it("assigns pitch using skew-corrected note positions", () => {
+		const width = 800;
+		const height = 300;
+		const tan = 0.02;
+		const staves = detectStaves(
+			rotatedStaff(width, height, tan),
+			width,
+			height,
+			tan,
+		);
+		// A notehead at x=600 sitting on the middle line: real y ≈ 104 + 600*0.02
+		const cy = 80 + 2 * 12 + 600 * tan;
+		const component = {
+			x1: 595,
+			y1: cy - 5,
+			x2: 605,
+			y2: cy + 5,
+			cx: 600,
+			cy,
+			area: 80,
+		};
+		const notes = componentsToNotes([component], staves, tan);
+		expect(notes.length).toBe(1);
+		expect(notes[0]).toMatchObject({ step: "B", octave: 4 });
 	});
 });
 

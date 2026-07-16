@@ -2,18 +2,23 @@
 // Images are plain objects: { data, width, height } where data is RGBA
 // (Uint8ClampedArray, 4 bytes/px) or grayscale (Uint8Array, 1 byte/px).
 
+// Default pixel budget for recognition. oemer's original protocol targets
+// [3.0M, 4.35M] pixels, but modern phone photos start at 10M+ and inference
+// cost scales linearly with pixel count — ~2 Mpx keeps staff-line spacing
+// comfortably above the models' working range at roughly half the tiles.
+export const PIXEL_BUDGET = { low: 1_800_000, high: 2_600_000 };
+
 /**
- * oemer resizes pages so the pixel count lands in [3.0M, 4.35M].
+ * Resize rule: scale the page so its pixel count lands inside the budget
+ * (images already inside are untouched; small images are upscaled).
  * Returns { width, height, scale } for the resized page.
  */
-export function targetSize(width, height) {
+export function targetSize(width, height, budget = PIXEL_BUDGET) {
 	const pixels = width * height;
-	const LOW = 3_000_000;
-	const HIGH = 4_350_000;
-	if (pixels >= LOW && pixels <= HIGH) {
+	if (pixels >= budget.low && pixels <= budget.high) {
 		return { width, height, scale: 1 };
 	}
-	const scale = Math.sqrt((LOW / pixels + HIGH / pixels) / 2);
+	const scale = Math.sqrt((budget.low / pixels + budget.high / pixels) / 2);
 	return {
 		width: Math.round(width * scale),
 		height: Math.round(height * scale),

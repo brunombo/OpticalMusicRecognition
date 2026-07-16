@@ -5,10 +5,9 @@
 	"type": "module",
 	"license": "MIT",
 	"scripts": {
-		"dev": "npm run copy:ort && vite",
-		"build": "npm run copy:ort && vite build",
+		"dev": "vite",
+		"build": "vite build",
 		"preview": "vite preview",
-		"copy:ort": "node scripts/copy-ort-assets.mjs",
 		"fetch:models": "bash scripts/fetch-models.sh",
 		"test": "vitest run",
 		"test:watch": "vitest",

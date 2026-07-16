@@ -8,6 +8,7 @@ import {
 	componentsToNotes,
 	connectedComponents,
 	detectStaves,
+	estimateSkew,
 } from "../analysis.js";
 import { binarize, otsuThreshold, toGrayscale } from "../preprocess.js";
 
@@ -30,7 +31,8 @@ export const classicalEngine = {
 		const ink = binarize(gray, otsuThreshold(gray));
 
 		onProgress?.({ stage: "staves", ratio: 0.3 });
-		const staves = detectStaves(ink, width, height);
+		const skewTan = estimateSkew(ink, width, height);
+		const staves = detectStaves(ink, width, height, skewTan);
 		if (staves.length === 0) {
 			return { staves: [], notes: [] };
 		}
@@ -47,11 +49,14 @@ export const classicalEngine = {
 		const probe = lineHalfThickness + 2;
 		for (const staff of staves) {
 			for (const lineY of staff.lineYs) {
-				const from = Math.max(0, Math.round(lineY) - lineHalfThickness);
-				const to = Math.min(height - 1, Math.round(lineY) + lineHalfThickness);
-				const above = Math.max(0, from - probe);
-				const below = Math.min(height - 1, to + probe);
 				for (let x = 0; x < width; x++) {
+					// Line positions are in skew-corrected space; map back to
+					// this column's real row
+					const rowAtX = Math.round(lineY + x * skewTan);
+					const from = Math.max(0, rowAtX - lineHalfThickness);
+					const to = Math.min(height - 1, rowAtX + lineHalfThickness);
+					const above = Math.max(0, from - probe);
+					const below = Math.min(height - 1, to + probe);
 					const symbolHere =
 						ink[above * width + x] === 1 || ink[below * width + x] === 1;
 					if (symbolHere) {
@@ -66,7 +71,7 @@ export const classicalEngine = {
 
 		onProgress?.({ stage: "notes", ratio: 0.8 });
 		const components = connectedComponents(noStaff, width, height);
-		const notes = componentsToNotes(components, staves);
+		const notes = componentsToNotes(components, staves, skewTan);
 		onProgress?.({ stage: "done", ratio: 1 });
 		return { staves, notes };
 	},

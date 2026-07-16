@@ -8,10 +8,16 @@
 // Protocol: page resized to 3–4.35 Mpx, sliding window (step 128),
 // overlapping predictions averaged, argmax per pixel.
 
+import ortMjsUrl from "onnxruntime-web/ort-wasm-simd-threaded.jsep.mjs?url";
+// Vite-resolved URLs for ORT's WASM runtime. ORT dynamically import()s the
+// .mjs glue module, which must NOT live in /public (Vite forbids importing
+// from there) — ?url assets work in both dev and production builds.
+import ortWasmUrl from "onnxruntime-web/ort-wasm-simd-threaded.jsep.wasm?url";
 import {
 	componentsToNotes,
 	connectedComponents,
 	detectStaves,
+	estimateSkew,
 } from "../analysis.js";
 import {
 	accumulateTile,
@@ -32,8 +38,7 @@ const sessions = {};
 async function loadOrt() {
 	if (!ort) {
 		ort = await import("onnxruntime-web");
-		// Self-hosted WASM binaries (copied by scripts/copy-ort-assets.mjs)
-		ort.env.wasm.wasmPaths = "/ort/";
+		ort.env.wasm.wasmPaths = { wasm: ortWasmUrl, mjs: ortMjsUrl };
 	}
 	return ort;
 }
@@ -114,9 +119,11 @@ export const oemerEngine = {
 		const staffMask = classMask(staffSymbolMap, 1);
 		const noteheadMask = classMask(symbolTypeMap, 2);
 
-		const staves = detectStaves(staffMask, width, height);
+		// Photos are rarely straight — measure the tilt from the staff mask
+		const skewTan = estimateSkew(staffMask, width, height);
+		const staves = detectStaves(staffMask, width, height, skewTan);
 		const components = connectedComponents(noteheadMask, width, height);
-		const notes = componentsToNotes(components, staves);
+		const notes = componentsToNotes(components, staves, skewTan);
 
 		onProgress?.({ stage: "done", ratio: 1 });
 		return { staves, notes };
