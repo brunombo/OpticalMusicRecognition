@@ -5,9 +5,11 @@
 // real recognizer.
 
 import {
+	assignMeasures,
 	classifyClefs,
 	componentsToNotes,
 	connectedComponents,
+	detectBarlines,
 	detectStaves,
 	estimateSkew,
 	groupSystems,
@@ -43,7 +45,8 @@ export const classicalEngine = {
 			trackStaffLines(staff, ink, width, height, skewTan);
 		}
 		// No clef mask without a model — rely on the grand-staff prior
-		classifyClefs(staves, [], groupSystems(staves), skewTan);
+		const systems = groupSystems(staves);
+		classifyClefs(staves, [], systems, skewTan);
 
 		// Erase staff lines so noteheads become isolated blobs — but only in
 		// columns where the line does not pass through a symbol (no ink just
@@ -84,7 +87,15 @@ export const classicalEngine = {
 			width,
 			height,
 		});
+
+		// Barlines from raw ink (no notehead mask to exclude against — the
+		// grand-staff span requirement does the filtering)
+		const barlinesBySystem = systems.map((system) =>
+			detectBarlines(staves, system, ink, null, width, height, skewTan),
+		);
+		assignMeasures(notes, staves, systems, barlinesBySystem);
+
 		onProgress?.({ stage: "done", ratio: 1 });
-		return { staves, notes };
+		return { staves, notes, systems };
 	},
 };

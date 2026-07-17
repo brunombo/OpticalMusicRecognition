@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+	assignMeasures,
 	classifyClefs,
 	componentsToNotes,
 	connectedComponents,
+	detectBarlines,
 	detectStaves,
 	estimateSkew,
 	groupSystems,
@@ -196,6 +198,92 @@ describe("chord splitting", () => {
 		// Heads on adjacent lines 110 and 120: D5 and B4 (a third apart)
 		const steps = notes.map((n) => `${n.step}${n.octave}`).sort();
 		expect(steps).toEqual(["B4", "D5"]);
+	});
+});
+
+describe("detectBarlines + assignMeasures", () => {
+	/**
+	 * Two-staff system (tops 100 and 180, unit 10) drawn into an ink map,
+	 * with vertical barlines spanning the full system and one note stem
+	 * spanning only the upper staff's inner range.
+	 */
+	function systemInk(width, height, barlineXs) {
+		const ink = new Uint8Array(width * height);
+		for (const topY of [100, 180]) {
+			for (let line = 0; line < 5; line++) {
+				for (let x = 20; x < width - 20; x++) {
+					ink[(topY + line * 10) * width + x] = 1;
+				}
+			}
+		}
+		// Full-system barlines: from 100 (top line of staff 1) to 220
+		// (bottom line of staff 2)
+		for (const bx of barlineXs) {
+			for (let y = 100; y <= 220; y++) {
+				ink[y * width + bx] = 1;
+			}
+		}
+		// A stem-like line inside staff 1 only (must NOT become a barline)
+		for (let y = 105; y <= 135; y++) {
+			ink[y * width + 200] = 1;
+		}
+		return ink;
+	}
+
+	it("finds full-system barlines and ignores stems", () => {
+		const width = 600;
+		const height = 300;
+		const ink = systemInk(width, height, [60, 300, 550]);
+		const staves = [staffAt(100), staffAt(180)];
+		const barlines = detectBarlines(
+			staves,
+			[0, 1],
+			ink,
+			null,
+			width,
+			height,
+			0,
+		);
+		expect(barlines.length).toBe(3);
+		expect(barlines[0]).toBeCloseTo(60, 0);
+		expect(barlines[1]).toBeCloseTo(300, 0);
+		expect(barlines[2]).toBeCloseTo(550, 0);
+	});
+
+	it("merges double barlines into one boundary", () => {
+		const width = 600;
+		const height = 300;
+		const ink = systemInk(width, height, [300, 308]);
+		const staves = [staffAt(100), staffAt(180)];
+		const barlines = detectBarlines(
+			staves,
+			[0, 1],
+			ink,
+			null,
+			width,
+			height,
+			0,
+		);
+		expect(barlines.length).toBe(1);
+	});
+
+	it("assigns measure indices shared by the system and drops the leading boundary", () => {
+		const staves = [staffAt(100), staffAt(180)];
+		// Leading barline at 60 (next to clef), then real boundaries
+		const barlines = [60, 300, 550];
+		const notes = [
+			{ staff: 0, x: 100 },
+			{ staff: 0, x: 400 },
+			{ staff: 1, x: 120 },
+			{ staff: 1, x: 580 },
+		];
+		assignMeasures(notes, staves, [[0, 1]], [barlines]);
+		expect(notes[0].measure).toBe(0);
+		expect(notes[1].measure).toBe(1);
+		expect(notes[2].measure).toBe(0);
+		expect(notes[3].measure).toBe(2);
+		expect(staves[0].barlineXs).toEqual(barlines);
+		expect(staves[1].barlineXs).toEqual(barlines);
 	});
 });
 

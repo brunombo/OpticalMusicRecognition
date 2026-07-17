@@ -593,6 +593,157 @@ export function componentsToNotes(
 	return notes;
 }
 
+/** Local line position (raw y) of a staff line at column x. */
+function lineYRawAt(staff, lineIndex, x, skewTan) {
+	let yPrime = staff.lineYs[lineIndex];
+	if (staff.lineTracks) {
+		const strip = Math.min(
+			staff.lineTracks[lineIndex].length - 1,
+			Math.max(0, Math.floor(x / staff.stripWidth)),
+		);
+		const tracked = staff.lineTracks[lineIndex][strip];
+		if (Number.isFinite(tracked)) {
+			yPrime = tracked;
+		}
+	}
+	return yPrime + x * skewTan;
+}
+
+/**
+ * Detect barlines for one system: columns of (nearly) continuous ink from
+ * the top line of the system's first staff to the bottom line of its last
+ * staff. In multi-staff systems (piano grand staff) barlines physically
+ * span both staves and the gap, which stems and beams never do — making
+ * this test very selective. Columns adjacent to noteheads are excluded to
+ * be safe on single-staff systems.
+ *
+ * Returns sorted barline x positions (shared by all staves of the system).
+ */
+export function detectBarlines(
+	staves,
+	system,
+	ink,
+	noteheadMask,
+	width,
+	height,
+	skewTan = 0,
+) {
+	const topStaff = staves[system[0]];
+	const bottomStaff = staves[system[system.length - 1]];
+	const unit = topStaff.unitSize;
+
+	// Column coverage over the system's vertical span
+	const coverage = new Float32Array(width);
+	for (let x = 0; x < width; x++) {
+		const yTop = Math.max(0, Math.round(lineYRawAt(topStaff, 0, x, skewTan)));
+		const yBottom = Math.min(
+			height - 1,
+			Math.round(lineYRawAt(bottomStaff, 4, x, skewTan)),
+		);
+		if (yBottom <= yTop) {
+			continue;
+		}
+		let hits = 0;
+		for (let y = yTop; y <= yBottom; y++) {
+			// Tolerate 1 px of horizontal wobble in the barline
+			if (
+				ink[y * width + x] === 1 ||
+				(x > 0 && ink[y * width + x - 1] === 1) ||
+				(x < width - 1 && ink[y * width + x + 1] === 1)
+			) {
+				hits++;
+			}
+		}
+		coverage[x] = hits / (yBottom - yTop + 1);
+	}
+
+	// Collapse runs of high-coverage columns into candidate barlines
+	const candidates = [];
+	let runStart = -1;
+	for (let x = 0; x <= width; x++) {
+		const hot = x < width && coverage[x] >= 0.85;
+		if (hot && runStart < 0) {
+			runStart = x;
+		} else if (!hot && runStart >= 0) {
+			const runWidth = x - runStart;
+			if (runWidth <= unit) {
+				candidates.push((runStart + x - 1) / 2);
+			}
+			runStart = -1;
+		}
+	}
+
+	// Merge close candidates (double/repeat barlines count as one boundary)
+	const merged = [];
+	for (const c of candidates) {
+		if (merged.length > 0 && c - merged[merged.length - 1] < unit * 2) {
+			merged[merged.length - 1] = (merged[merged.length - 1] + c) / 2;
+		} else {
+			merged.push(c);
+		}
+	}
+
+	// Reject candidates sitting on a notehead column (chord + stem stacks)
+	if (!noteheadMask) {
+		return merged;
+	}
+	return merged.filter((bx) => {
+		const x0 = Math.max(0, Math.round(bx - unit));
+		const x1 = Math.min(width - 1, Math.round(bx + unit));
+		const y0 = Math.max(
+			0,
+			Math.round(lineYRawAt(topStaff, 0, bx, skewTan) - unit),
+		);
+		const y1 = Math.min(
+			height - 1,
+			Math.round(lineYRawAt(bottomStaff, 4, bx, skewTan) + unit),
+		);
+		let noteheadPixels = 0;
+		for (let y = y0; y <= y1; y++) {
+			for (let x = x0; x <= x1; x++) {
+				noteheadPixels += noteheadMask[y * width + x];
+			}
+		}
+		return noteheadPixels < unit * unit * 0.3;
+	});
+}
+
+/**
+ * Assign a measure index to every note from its system's shared barlines,
+ * then normalize per system so the first measure containing notes is 0
+ * (drops the phantom measure before the leading barline next to the clef).
+ * Mutates notes (note.measure) and staves (staff.barlineXs).
+ */
+export function assignMeasures(notes, staves, systems, barlinesBySystem) {
+	for (let sysIndex = 0; sysIndex < systems.length; sysIndex++) {
+		const system = systems[sysIndex];
+		const barlines = barlinesBySystem[sysIndex] ?? [];
+		for (const staffIndex of system) {
+			staves[staffIndex].barlineXs = barlines;
+		}
+		const systemNotes = notes.filter((n) => system.includes(n.staff));
+		if (barlines.length === 0 || systemNotes.length === 0) {
+			continue;
+		}
+		let minMeasure = Number.POSITIVE_INFINITY;
+		for (const note of systemNotes) {
+			let m = 0;
+			for (const bx of barlines) {
+				if (note.x > bx) {
+					m++;
+				}
+			}
+			note.measure = m;
+			if (m < minMeasure) {
+				minMeasure = m;
+			}
+		}
+		for (const note of systemNotes) {
+			note.measure -= minMeasure;
+		}
+	}
+}
+
 /**
  * Full reconstruction from segmentation masks to a score IR — the shared
  * path for the oemer engine and the e2e harness.
@@ -617,6 +768,23 @@ export function reconstructScore(masks, width, height) {
 		width,
 		height,
 	});
+
+	// Barlines → real measures, shared within each system so the two hands
+	// of a grand staff always agree on the measure count
+	if (masks.ink) {
+		const barlinesBySystem = systems.map((system) =>
+			detectBarlines(
+				staves,
+				system,
+				masks.ink,
+				masks.notehead,
+				width,
+				height,
+				skewTan,
+			),
+		);
+		assignMeasures(notes, staves, systems, barlinesBySystem);
+	}
 	return { staves, notes, systems, skewTan };
 }
 

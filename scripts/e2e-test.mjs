@@ -58,12 +58,14 @@ function report(label, score) {
 		`[${label}] staves: ${score.staves.length}, notes: ${score.notes.length}`,
 	);
 	for (const [i, staff] of score.staves.entries()) {
-		const n = score.notes.filter((note) => note.staff === i).length;
-		const chords = score.notes.filter(
-			(note) => note.staff === i && note.chord,
-		).length;
+		const staffNotes = score.notes.filter((note) => note.staff === i);
+		const chords = staffNotes.filter((note) => note.chord).length;
+		const measures =
+			staffNotes.length > 0
+				? Math.max(...staffNotes.map((n) => (n.measure ?? 0) + 1))
+				: 0;
 		console.log(
-			`  staff ${i}: top=${staff.top.toFixed(0)} unit=${staff.unitSize.toFixed(1)} clef=${staff.clef} notes=${n} (chord members: ${chords})`,
+			`  staff ${i}: top=${staff.top.toFixed(0)} unit=${staff.unitSize.toFixed(1)} clef=${staff.clef} notes=${staffNotes.length} (chords: ${chords}) barlines=${staff.barlineXs?.length ?? 0} measures=${measures}`,
 		);
 	}
 }

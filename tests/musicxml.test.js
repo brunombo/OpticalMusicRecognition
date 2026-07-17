@@ -69,6 +69,45 @@ describe("buildMusicXml", () => {
 		expect(xml).not.toContain('<measure number="2">');
 	});
 
+	it("aligns measures across a grand-staff system and pads with rests", () => {
+		const xml = buildMusicXml({
+			staves: [
+				{ clef: "treble", barlineXs: [300, 550] },
+				{ clef: "bass", barlineXs: [300, 550] },
+			],
+			systems: [[0, 1]],
+			notes: [
+				// Staff 0: 2 quarters in measure 0, nothing in measure 1
+				{ staff: 0, step: "C", octave: 5, duration: "quarter", measure: 0 },
+				{ staff: 0, step: "D", octave: 5, duration: "quarter", measure: 0 },
+				// Staff 1: 1 quarter in measure 0, 4 quarters in measure 1
+				{ staff: 1, step: "C", octave: 3, duration: "quarter", measure: 0 },
+				{ staff: 1, step: "D", octave: 3, duration: "quarter", measure: 1 },
+				{ staff: 1, step: "E", octave: 3, duration: "quarter", measure: 1 },
+				{ staff: 1, step: "F", octave: 3, duration: "quarter", measure: 1 },
+				{ staff: 1, step: "G", octave: 3, duration: "quarter", measure: 1 },
+			],
+		});
+		// Both parts must have exactly 2 measures
+		const partXml = xml.split("<part id=");
+		expect((partXml[1].match(/<measure /g) ?? []).length).toBe(2);
+		expect((partXml[2].match(/<measure /g) ?? []).length).toBe(2);
+		// Measure 0 target = 2 beats: staff1 (1 quarter) gets a quarter rest.
+		// Measure 1 target = 4 beats: staff0 (empty) gets a whole rest.
+		expect(xml).toContain("<rest/>");
+		expect(partXml[1]).toContain("<type>whole</type>"); // staff 0 empty m2
+		// Sounding durations per measure are equal across parts
+		const durations = (part, m) =>
+			(
+				part.split("<measure ")[m + 1].match(/<duration>(\d+)<\/duration>/g) ??
+				[]
+			)
+				.map((d) => Number(d.replace(/\D/g, "")))
+				.reduce((a, b) => a + b, 0);
+		expect(durations(partXml[1], 0)).toBe(durations(partXml[2], 0));
+		expect(durations(partXml[1], 1)).toBe(durations(partXml[2], 1));
+	});
+
 	it("renders half and whole note types", () => {
 		const xml = buildMusicXml({
 			staves: [{ clef: "treble" }],
