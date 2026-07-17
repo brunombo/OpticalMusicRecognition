@@ -50,4 +50,34 @@ describe("buildMusicXml", () => {
 		expect(xml).toContain('<measure number="1">');
 		expect(xml).not.toContain("<note>");
 	});
+
+	it("emits <chord/> for chord members and gives them no extra time", () => {
+		const xml = buildMusicXml({
+			staves: [{ clef: "treble" }],
+			notes: [
+				{ staff: 0, step: "C", octave: 4, duration: "quarter" },
+				{ staff: 0, step: "E", octave: 4, duration: "quarter", chord: true },
+				{ staff: 0, step: "G", octave: 4, duration: "quarter", chord: true },
+				{ staff: 0, step: "D", octave: 4, duration: "quarter" },
+				{ staff: 0, step: "E", octave: 4, duration: "quarter" },
+				{ staff: 0, step: "F", octave: 4, duration: "quarter" },
+			],
+		});
+		expect((xml.match(/<chord\/>/g) ?? []).length).toBe(2);
+		// 4 sounding beats (chord counts once) → everything fits measure 1
+		expect(xml).toContain('<measure number="1">');
+		expect(xml).not.toContain('<measure number="2">');
+	});
+
+	it("renders half and whole note types", () => {
+		const xml = buildMusicXml({
+			staves: [{ clef: "treble" }],
+			notes: [
+				{ staff: 0, step: "C", octave: 5, duration: "half" },
+				{ staff: 0, step: "D", octave: 5, duration: "whole" },
+			],
+		});
+		expect(xml).toContain("<type>half</type>");
+		expect(xml).toContain("<type>whole</type>");
+	});
 });

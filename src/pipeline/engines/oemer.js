@@ -13,12 +13,8 @@ import ortMjsUrl from "onnxruntime-web/ort-wasm-simd-threaded.jsep.mjs?url";
 // .mjs glue module, which must NOT live in /public (Vite forbids importing
 // from there) — ?url assets work in both dev and production builds.
 import ortWasmUrl from "onnxruntime-web/ort-wasm-simd-threaded.jsep.wasm?url";
-import {
-	componentsToNotes,
-	connectedComponents,
-	detectStaves,
-	estimateSkew,
-} from "../analysis.js";
+import { reconstructScore } from "../analysis.js";
+import { binarize, otsuThreshold, toGrayscale } from "../preprocess.js";
 import {
 	accumulateTile,
 	argmaxMap,
@@ -34,6 +30,8 @@ const MODELS = {
 
 let ort = null;
 const sessions = {};
+// null = untested; once WebGPU fails or stalls we stop trying it
+let webgpuUsable = null;
 
 async function loadOrt() {
 	if (!ort) {
@@ -43,16 +41,85 @@ async function loadOrt() {
 	return ort;
 }
 
-async function getSession(model) {
+/** Download a model with progress reporting; returns its bytes. */
+async function fetchModel(url, onProgress) {
+	const response = await fetch(url);
+	if (!response.ok) {
+		throw new Error(`Model download failed (${response.status}): ${url}`);
+	}
+	const total = Number(response.headers.get("content-length")) || 0;
+	if (!response.body || total === 0) {
+		return new Uint8Array(await response.arrayBuffer());
+	}
+	const bytes = new Uint8Array(total);
+	const reader = response.body.getReader();
+	let received = 0;
+	while (true) {
+		const { done, value } = await reader.read();
+		if (done) {
+			break;
+		}
+		bytes.set(value, received);
+		received += value.length;
+		onProgress?.(received / total);
+	}
+	return bytes;
+}
+
+function withTimeout(promise, ms, label) {
+	return new Promise((resolve, reject) => {
+		const timer = setTimeout(
+			() => reject(new Error(`${label} timed out after ${ms} ms`)),
+			ms,
+		);
+		promise.then(
+			(v) => {
+				clearTimeout(timer);
+				resolve(v);
+			},
+			(e) => {
+				clearTimeout(timer);
+				reject(e);
+			},
+		);
+	});
+}
+
+async function getSession(model, onProgress) {
 	if (!sessions[model.url]) {
 		const rt = await loadOrt();
-		const providers =
-			typeof navigator !== "undefined" && navigator.gpu
-				? ["webgpu", "wasm"]
-				: ["wasm"];
-		sessions[model.url] = await rt.InferenceSession.create(model.url, {
-			executionProviders: providers,
-		});
+		const bytes = await fetchModel(model.url, (ratio) =>
+			onProgress?.({ stage: "downloading model", ratio }),
+		);
+		onProgress?.({ stage: "initializing model", ratio: 1 });
+
+		// WebGPU initialization can stall indefinitely on flaky GPU drivers
+		// (notably Chrome/Linux) — guard it with a watchdog and fall back to
+		// WASM. Once it fails we don't try again this session.
+		const tryWebgpu =
+			typeof navigator !== "undefined" &&
+			navigator.gpu &&
+			webgpuUsable !== false;
+		if (tryWebgpu) {
+			try {
+				sessions[model.url] = await withTimeout(
+					rt.InferenceSession.create(bytes, {
+						executionProviders: ["webgpu", "wasm"],
+					}),
+					20000,
+					"WebGPU session creation",
+				);
+				webgpuUsable = true;
+			} catch (error) {
+				console.warn(`WebGPU unusable, falling back to WASM: ${error.message}`);
+				webgpuUsable = false;
+			}
+		}
+		if (!sessions[model.url]) {
+			sessions[model.url] = await rt.InferenceSession.create(bytes, {
+				executionProviders: ["wasm"],
+			});
+		}
 	}
 	return sessions[model.url];
 }
@@ -95,11 +162,19 @@ export const oemerEngine = {
 	name: "oemer neural network (accurate, ~110 MB download)",
 
 	async prepare({ onProgress } = {}) {
-		onProgress?.({ stage: "loading unet_big", ratio: 0 });
-		await getSession(MODELS.unetBig);
-		onProgress?.({ stage: "loading seg_net", ratio: 0.5 });
-		await getSession(MODELS.segNet);
-		onProgress?.({ stage: "ready", ratio: 1 });
+		await getSession(MODELS.unetBig, (p) =>
+			onProgress?.({
+				stage: `unet_big: ${p.stage}`,
+				ratio: p.ratio * 0.5,
+			}),
+		);
+		await getSession(MODELS.segNet, (p) =>
+			onProgress?.({
+				stage: `seg_net: ${p.stage}`,
+				ratio: 0.5 + p.ratio * 0.5,
+			}),
+		);
+		onProgress?.({ stage: "models ready", ratio: 1 });
 	},
 
 	async recognize(image, { onProgress } = {}) {
@@ -116,16 +191,20 @@ export const oemerEngine = {
 		);
 
 		onProgress?.({ stage: "reconstruction", ratio: 0.92 });
-		const staffMask = classMask(staffSymbolMap, 1);
-		const noteheadMask = classMask(symbolTypeMap, 2);
-
-		// Photos are rarely straight — measure the tilt from the staff mask
-		const skewTan = estimateSkew(staffMask, width, height);
-		const staves = detectStaves(staffMask, width, height, skewTan);
-		const components = connectedComponents(noteheadMask, width, height);
-		const notes = componentsToNotes(components, staves, skewTan);
+		const gray = toGrayscale(image.data, width, height);
+		const score = reconstructScore(
+			{
+				staff: classMask(staffSymbolMap, 1),
+				notehead: classMask(symbolTypeMap, 2),
+				stemsRests: classMask(symbolTypeMap, 1),
+				clefsKeys: classMask(symbolTypeMap, 3),
+				ink: binarize(gray, otsuThreshold(gray)),
+			},
+			width,
+			height,
+		);
 
 		onProgress?.({ stage: "done", ratio: 1 });
-		return { staves, notes };
+		return score;
 	},
 };

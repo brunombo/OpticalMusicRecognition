@@ -1,0 +1,66 @@
+<!doctype html>
+<!-- Debug harness: exercises the recognition worker exactly like the app.
+     Open /debug-worker.html (dev server) and watch the console. -->
+<html lang="en">
+	<head>
+		<meta charset="UTF-8" />
+		<title>worker debug</title>
+	</head>
+	<body>
+		<pre id="log"></pre>
+		<script type="module">
+			const logEl = document.getElementById("log");
+			const log = (...args) => {
+				console.log("[debug]", ...args);
+				logEl.textContent += `${args.join(" ")}\n`;
+			};
+			log("crossOriginIsolated:", globalThis.crossOriginIsolated);
+			log("navigator.gpu:", !!navigator.gpu);
+
+			const worker = new Worker(
+				new URL("./src/pipeline/worker.js", import.meta.url),
+				{ type: "module" },
+			);
+			worker.addEventListener("error", (e) =>
+				log("WORKER ERROR:", e.message, e.filename, e.lineno),
+			);
+			worker.addEventListener("messageerror", () => log("WORKER MESSAGEERROR"));
+			worker.addEventListener("message", (e) => {
+				if (e.data.type === "progress") {
+					log("progress:", e.data.progress.stage, e.data.progress.ratio);
+				} else if (e.data.type === "result") {
+					log(
+						"RESULT: staves",
+						e.data.score.staves.length,
+						"notes",
+						e.data.score.notes.length,
+					);
+					log("DONE");
+				} else if (e.data.type === "error") {
+					log("PIPELINE ERROR:", e.data.message);
+				}
+			});
+
+			// Tiny white image with one black staff — enough to exercise the
+			// full oemer path (model load + a few tiles)
+			const width = 512;
+			const height = 512;
+			const data = new Uint8ClampedArray(width * height * 4).fill(255);
+			for (const line of [200, 210, 220, 230, 240]) {
+				for (let x = 40; x < 470; x++) {
+					const o = (line * width + x) * 4;
+					data[o] = 0;
+					data[o + 1] = 0;
+					data[o + 2] = 0;
+				}
+			}
+			log("posting recognize (oemer)...");
+			worker.postMessage({
+				id: 1,
+				engineId: "oemer",
+				image: { data, width, height },
+			});
+			setInterval(() => log("still alive", performance.now().toFixed(0)), 5000);
+		</script>
+	</body>
+</html>

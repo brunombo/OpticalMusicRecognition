@@ -2,19 +2,22 @@
 // engines (classical CV + oemer ONNX) through the same modules the browser
 // uses, validates the MusicXML with Verovio, and writes results to out/.
 //
-// Usage: node scripts/e2e-test.mjs [image.png] [--skip-oemer]
+// Usage: node scripts/e2e-test.mjs [image.png] [--skip-oemer] [--cached]
+//   --cached reuses the label maps from the previous run (out/cache-*.bin)
+//   to iterate on reconstruction without re-running inference (~11 min).
 
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { PNG } from "pngjs";
-import {
-	componentsToNotes,
-	connectedComponents,
-	detectStaves,
-	estimateSkew,
-} from "../src/pipeline/analysis.js";
+import { reconstructScore } from "../src/pipeline/analysis.js";
 import { classicalEngine } from "../src/pipeline/engines/classical.js";
 import { buildMusicXml } from "../src/pipeline/musicxml.js";
-import { resizeRgba, targetSize } from "../src/pipeline/preprocess.js";
+import {
+	binarize,
+	otsuThreshold,
+	resizeRgba,
+	targetSize,
+	toGrayscale,
+} from "../src/pipeline/preprocess.js";
 import {
 	accumulateTile,
 	argmaxMap,
@@ -25,6 +28,7 @@ import {
 const args = process.argv.slice(2);
 const imagePath = args.find((a) => !a.startsWith("--")) ?? "test.png";
 const skipOemer = args.includes("--skip-oemer");
+const useCache = args.includes("--cached");
 
 mkdirSync("out", { recursive: true });
 
@@ -55,19 +59,27 @@ function report(label, score) {
 	);
 	for (const [i, staff] of score.staves.entries()) {
 		const n = score.notes.filter((note) => note.staff === i).length;
+		const chords = score.notes.filter(
+			(note) => note.staff === i && note.chord,
+		).length;
 		console.log(
-			`  staff ${i}: top=${staff.top.toFixed(0)} unit=${staff.unitSize.toFixed(1)} notes=${n}`,
+			`  staff ${i}: top=${staff.top.toFixed(0)} unit=${staff.unitSize.toFixed(1)} clef=${staff.clef} notes=${n} (chord members: ${chords})`,
 		);
 	}
 }
 
-async function validateWithVerovio(xml) {
+async function validateWithVerovio(xml, svgName) {
 	try {
 		const { default: createVerovioModule } = await import("verovio/wasm");
 		const { VerovioToolkit } = await import("verovio/esm");
 		const toolkit = new VerovioToolkit(await createVerovioModule());
 		if (!toolkit.loadData(xml)) {
 			return "Verovio REJECTED the MusicXML";
+		}
+		if (svgName) {
+			toolkit.setOptions({ adjustPageHeight: true, scale: 40 });
+			toolkit.loadData(xml);
+			writeFileSync(`out/${svgName}.svg`, toolkit.renderToSVG(1));
 		}
 		return `Verovio OK (${toolkit.getPageCount()} page(s))`;
 	} catch (e) {
@@ -83,7 +95,7 @@ console.log(`elapsed: ${((Date.now() - t0) / 1000).toFixed(1)}s`);
 report("classical", classicalScore);
 const classicalXml = buildMusicXml(classicalScore, { title: "e2e classical" });
 writeFileSync("out/classical.musicxml", classicalXml);
-console.log(await validateWithVerovio(classicalXml));
+console.log(await validateWithVerovio(classicalXml, "classical"));
 
 // ---------- 2. oemer engine ----------------------------------------------
 if (skipOemer) {
@@ -130,30 +142,69 @@ async function runModel(file, win, classes) {
 	return argmaxMap(sum, count, width, height, classes);
 }
 
-const staffSymbolMap = await runModel("public/models/unet_big.onnx", 256, 3);
-const symbolTypeMap = await runModel("public/models/seg_net.onnx", 288, 4);
+function cachePath(name) {
+	return `out/cache-${name}-${width}x${height}.bin`;
+}
+
+async function cachedModel(name, file, win, classes) {
+	const path = cachePath(name);
+	if (useCache && existsSync(path)) {
+		console.log(`  ${name}: using cached label map (${path})`);
+		return new Uint8Array(readFileSync(path));
+	}
+	const map = await runModel(file, win, classes);
+	writeFileSync(path, map);
+	return map;
+}
+
+const staffSymbolMap = await cachedModel(
+	"staffsymbol",
+	"public/models/unet_big.onnx",
+	256,
+	3,
+);
+const symbolTypeMap = await cachedModel(
+	"symboltype",
+	"public/models/seg_net.onnx",
+	288,
+	4,
+);
 
 const staffMask = new Uint8Array(staffSymbolMap.length);
 const noteheadMask = new Uint8Array(symbolTypeMap.length);
+const stemsRestsMask = new Uint8Array(symbolTypeMap.length);
+const clefsKeysMask = new Uint8Array(symbolTypeMap.length);
 for (let i = 0; i < staffSymbolMap.length; i++) {
 	staffMask[i] = staffSymbolMap[i] === 1 ? 1 : 0;
 	noteheadMask[i] = symbolTypeMap[i] === 2 ? 1 : 0;
+	stemsRestsMask[i] = symbolTypeMap[i] === 1 ? 1 : 0;
+	clefsKeysMask[i] = symbolTypeMap[i] === 3 ? 1 : 0;
 }
 saveMask("mask-staff", staffMask);
 saveMask("mask-notehead", noteheadMask);
+saveMask("mask-clefs", clefsKeysMask);
 
-const skewTan = estimateSkew(staffMask, width, height);
-console.log(
-	`estimated skew: ${((Math.atan(skewTan) * 180) / Math.PI).toFixed(2)} deg`,
+const gray = toGrayscale(image.data, width, height);
+const oemerScore = reconstructScore(
+	{
+		staff: staffMask,
+		notehead: noteheadMask,
+		stemsRests: stemsRestsMask,
+		clefsKeys: clefsKeysMask,
+		ink: binarize(gray, otsuThreshold(gray)),
+	},
+	width,
+	height,
 );
-const staves = detectStaves(staffMask, width, height, skewTan);
-const components = connectedComponents(noteheadMask, width, height);
-const notes = componentsToNotes(components, staves, skewTan);
-const oemerScore = { staves, notes };
+console.log(
+	`estimated skew: ${((Math.atan(oemerScore.skewTan) * 180) / Math.PI).toFixed(2)} deg`,
+);
 report("oemer", oemerScore);
-console.log(`notehead components (pre-filter): ${components.length}`);
+console.log(
+	`systems: ${oemerScore.systems.map((sys) => `[${sys.join(",")}]`).join(" ")}`,
+);
 
 const oemerXml = buildMusicXml(oemerScore, { title: "e2e oemer" });
 writeFileSync("out/oemer.musicxml", oemerXml);
-console.log(await validateWithVerovio(oemerXml));
+console.log(await validateWithVerovio(oemerXml, "oemer"));
 console.log("\nOutputs written to out/");

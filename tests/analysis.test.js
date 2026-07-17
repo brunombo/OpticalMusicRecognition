@@ -1,10 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
+	classifyClefs,
 	componentsToNotes,
 	connectedComponents,
 	detectStaves,
 	estimateSkew,
+	groupSystems,
+	pitchAt,
 	pitchFromY,
+	trackStaffLines,
 } from "../src/pipeline/analysis.js";
 
 /** Draw a synthetic staff map: 5 horizontal lines, spacing 10 px. */
@@ -46,6 +50,152 @@ describe("detectStaves", () => {
 		const staves = detectStaves(map, width, height);
 		expect(staves.length).toBe(2);
 		expect(staves[0].top).toBeLessThan(staves[1].top);
+	});
+});
+
+function staffAt(topY, unit = 10, clef = "treble") {
+	const lineYs = [0, 1, 2, 3, 4].map((i) => topY + i * unit);
+	return {
+		lineYs,
+		top: lineYs[0],
+		bottom: lineYs[4],
+		unitSize: unit,
+		clef,
+	};
+}
+
+describe("groupSystems", () => {
+	it("pairs piano staves separated by small gaps", () => {
+		// Two systems of two staves: gaps 40 (intra), 120 (inter), 40 (intra)
+		const staves = [staffAt(100), staffAt(180), staffAt(340), staffAt(420)];
+		expect(groupSystems(staves)).toEqual([
+			[0, 1],
+			[2, 3],
+		]);
+	});
+
+	it("keeps uniformly spaced staves as separate systems", () => {
+		const staves = [staffAt(100), staffAt(240), staffAt(380)];
+		expect(groupSystems(staves)).toEqual([[0], [1], [2]]);
+	});
+
+	it("handles a single staff", () => {
+		expect(groupSystems([staffAt(100)])).toEqual([[0]]);
+	});
+});
+
+describe("classifyClefs", () => {
+	// Staff: top=100, unit=10, bottom=140
+	function clefBlob(x1, y1, height) {
+		return {
+			x1,
+			y1,
+			x2: x1 + 20,
+			y2: y1 + height - 1,
+			cx: x1 + 10,
+			cy: y1 + height / 2,
+			area: 20 * height * 0.5,
+		};
+	}
+
+	it("classifies a tall blob as treble and a short one as bass", () => {
+		const staves = [staffAt(100), staffAt(200)];
+		// Treble clef: ~7 units tall, overshooting the staff on both sides
+		const treble = clefBlob(10, 90, 70);
+		// Bass clef: ~3 units, sitting in the upper half of staff 2
+		const bass = clefBlob(10, 200, 30);
+		classifyClefs(staves, [treble, bass], [[0], [1]]);
+		expect(staves[0].clef).toBe("treble");
+		expect(staves[1].clef).toBe("bass");
+	});
+
+	it("falls back to the grand-staff prior when blobs are missing", () => {
+		const staves = [staffAt(100), staffAt(180)];
+		classifyClefs(staves, [], [[0, 1]]);
+		expect(staves[0].clef).toBe("treble");
+		expect(staves[1].clef).toBe("bass");
+	});
+
+	it("uses treble for single staves with no blob", () => {
+		const staves = [staffAt(100)];
+		classifyClefs(staves, [], [[0]]);
+		expect(staves[0].clef).toBe("treble");
+	});
+});
+
+describe("4-line staff recovery", () => {
+	it("recovers a staff whose faintest line misses the projection threshold", () => {
+		const width = 400;
+		const height = 200;
+		const map = new Uint8Array(width * height);
+		// Lines at 60,70,80,90 full width; line at 100 only 30% width
+		// (below the width*0.2... make it just above mask presence but below
+		// the projection threshold: draw 25% of columns)
+		for (const y of [60, 70, 80, 90]) {
+			for (let x = 0; x < width; x++) {
+				map[y * width + x] = 1;
+			}
+		}
+		for (let x = 0; x < width * 0.25; x++) {
+			map[100 * width + x] = 1;
+		}
+		const staves = detectStaves(map, width, height);
+		expect(staves.length).toBe(1);
+		expect(staves[0].lineYs.length).toBe(5);
+		expect(staves[0].lineYs[4]).toBeCloseTo(100, 0);
+	});
+});
+
+describe("trackStaffLines + curvature-aware pitch", () => {
+	it("corrects pitch under local line bending", () => {
+		const width = 640;
+		const height = 300;
+		const unit = 10;
+		const map = new Uint8Array(width * height);
+		// Staff whose lines bow quadratically downward: +4 px at x=width.
+		// A nonlinear bend cannot be fixed by global skew correction.
+		const bend = (x) => 4 * (x / width) ** 2;
+		for (let line = 0; line < 5; line++) {
+			for (let x = 0; x < width; x++) {
+				const y = Math.round(100 + line * unit + bend(x));
+				map[y * width + x] = 1;
+			}
+		}
+		// Staff geometry as global detection would see it (straight lines)
+		const staff = staffAt(100, unit);
+		trackStaffLines(staff, map, width, height, 0);
+
+		// A note sitting exactly on the bent middle line at the right edge:
+		// raw y ≈ 120 + 3.8. Without tracking that reads a step low.
+		const x = width - 20;
+		const y = 120 + bend(x);
+		expect(pitchAt(x, y, staff)).toEqual({ step: "B", octave: 4 });
+		// Global (untracked) mapping gives the wrong note
+		expect(pitchFromY(y, staff)).not.toEqual({ step: "B", octave: 4 });
+	});
+});
+
+describe("chord splitting", () => {
+	it("splits a two-unit-tall notehead blob into two chord notes", () => {
+		const staff = staffAt(100); // unit 10, middle line 120
+		// Blob spanning two stacked heads: y 105..124 (heads at ~110 and ~120)
+		const blob = {
+			x1: 50,
+			y1: 105,
+			x2: 61,
+			y2: 124,
+			cx: 55.5,
+			cy: 114.5,
+			area: 150,
+		};
+		const notes = componentsToNotes([blob], [staff]);
+		expect(notes.length).toBe(2);
+		// Same x → the second is a chord member
+		expect(notes[0].chord).toBe(false);
+		expect(notes[1].chord).toBe(true);
+		// Heads on adjacent lines 110 and 120: D5 and B4 (a third apart)
+		const steps = notes.map((n) => `${n.step}${n.octave}`).sort();
+		expect(steps).toEqual(["B4", "D5"]);
 	});
 });
 

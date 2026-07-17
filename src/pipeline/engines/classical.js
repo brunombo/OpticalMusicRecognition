@@ -5,10 +5,13 @@
 // real recognizer.
 
 import {
+	classifyClefs,
 	componentsToNotes,
 	connectedComponents,
 	detectStaves,
 	estimateSkew,
+	groupSystems,
+	trackStaffLines,
 } from "../analysis.js";
 import { binarize, otsuThreshold, toGrayscale } from "../preprocess.js";
 
@@ -36,6 +39,11 @@ export const classicalEngine = {
 		if (staves.length === 0) {
 			return { staves: [], notes: [] };
 		}
+		for (const staff of staves) {
+			trackStaffLines(staff, ink, width, height, skewTan);
+		}
+		// No clef mask without a model — rely on the grand-staff prior
+		classifyClefs(staves, [], groupSystems(staves), skewTan);
 
 		// Erase staff lines so noteheads become isolated blobs — but only in
 		// columns where the line does not pass through a symbol (no ink just
@@ -71,7 +79,11 @@ export const classicalEngine = {
 
 		onProgress?.({ stage: "notes", ratio: 0.8 });
 		const components = connectedComponents(noStaff, width, height);
-		const notes = componentsToNotes(components, staves, skewTan);
+		const notes = componentsToNotes(components, staves, skewTan, {
+			ink,
+			width,
+			height,
+		});
 		onProgress?.({ stage: "done", ratio: 1 });
 		return { staves, notes };
 	},

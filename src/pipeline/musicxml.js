@@ -30,6 +30,7 @@ function noteXml(note, divisions) {
 	);
 	return [
 		"<note>",
+		note.chord ? "<chord/>" : "",
 		"<pitch>",
 		`<step>${escapeXml(note.step)}</step>`,
 		`<octave>${note.octave}</octave>`,
@@ -61,13 +62,15 @@ export function buildMusicXml(score, options = {}) {
 		const notes = score.notes.filter((n) => n.staff === s);
 		const clef = score.staves[s]?.clef ?? "treble";
 
-		// Split notes into measures of `beats` quarters
+		// Split notes into measures of `beats` quarters. Chord members
+		// (note.chord) sound with the previous note and take no extra time —
+		// they must also never be separated from their chord's first note.
 		const measures = [];
 		let current = [];
 		let used = 0;
 		for (const note of notes) {
-			const length = DURATION_DIVISIONS[note.duration] ?? 1;
-			if (used + length > beats && current.length > 0) {
+			const length = note.chord ? 0 : (DURATION_DIVISIONS[note.duration] ?? 1);
+			if (!note.chord && used + length > beats && current.length > 0) {
 				measures.push(current);
 				current = [];
 				used = 0;
