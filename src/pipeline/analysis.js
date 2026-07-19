@@ -593,6 +593,104 @@ export function componentsToNotes(
 	return notes;
 }
 
+/**
+ * Detect rest glyphs among the stems/rests segmentation components.
+ * Geometry separates them from everything else sharing the mask:
+ * stems and barlines are thin (width < ~0.45 unit), beams are wide and
+ * flat, while rests sit inside the staff band with characteristic shapes:
+ *   quarter rest — zigzag ~2.2–3.6 units tall
+ *   eighth rest  — ~1.3–2.2 units tall
+ *   whole rest   — small box hanging below the 2nd line (lineYs[1])
+ *   half rest    — small box sitting on the middle line (lineYs[2])
+ * Components adjacent to noteheads are stems/flags, never rests.
+ *
+ * Returns rest objects { staff, x, y, duration, rest: true, chord: false }.
+ */
+export function componentsToRests(
+	components,
+	staves,
+	skewTan = 0,
+	extras = {},
+) {
+	const { noteheadMask, width, height } = extras;
+	if (staves.length === 0) {
+		return [];
+	}
+	const rests = [];
+	for (const c of components) {
+		const cy = c.cy - c.cx * skewTan;
+		let staffIndex = 0;
+		let bestDistance = Number.POSITIVE_INFINITY;
+		for (let s = 0; s < staves.length; s++) {
+			const d = Math.abs(cy - staves[s].lineYs[2]);
+			if (d < bestDistance) {
+				bestDistance = d;
+				staffIndex = s;
+			}
+		}
+		const staff = staves[staffIndex];
+		const unit = staff.unitSize;
+		const w = c.x2 - c.x1 + 1;
+		const h = c.y2 - c.y1 + 1;
+
+		// Thin verticals are stems/barlines; wide flats are beams
+		if (w < unit * 0.45 || w > unit * 2.2) {
+			continue;
+		}
+		// Rests live inside the staff band
+		if (cy < staff.top - unit || cy > staff.bottom + unit) {
+			continue;
+		}
+		// Anything touching a notehead is stem/flag machinery
+		if (noteheadMask && width) {
+			const x0 = Math.max(0, c.x1 - 2);
+			const x1 = Math.min(width - 1, c.x2 + 2);
+			const y0 = Math.max(0, c.y1 - Math.round(unit));
+			const y1 = Math.min(height - 1, c.y2 + Math.round(unit));
+			let noteheadPixels = 0;
+			for (let y = y0; y <= y1; y++) {
+				for (let x = x0; x <= x1; x++) {
+					noteheadPixels += noteheadMask[y * width + x];
+				}
+			}
+			if (noteheadPixels > unit * unit * 0.15) {
+				continue;
+			}
+		}
+
+		let duration = null;
+		if (h >= unit * 2.2 && h <= unit * 3.6 && c.area >= unit * unit * 0.4) {
+			duration = "quarter";
+		} else if (
+			h >= unit * 1.3 &&
+			h < unit * 2.2 &&
+			c.area >= unit * unit * 0.3
+		) {
+			duration = "eighth";
+		} else if (h <= unit * 0.9 && w >= unit * 0.7) {
+			// Box rest: whole hangs below lineYs[1], half sits on lineYs[2]
+			const wholeCenter = staff.lineYs[1] + unit * 0.25;
+			const halfCenter = staff.lineYs[2] - unit * 0.25;
+			duration =
+				Math.abs(cy - wholeCenter) < Math.abs(cy - halfCenter)
+					? "whole"
+					: "half";
+		}
+		if (!duration) {
+			continue;
+		}
+		rests.push({
+			staff: staffIndex,
+			x: c.cx,
+			y: cy + c.cx * skewTan,
+			duration,
+			rest: true,
+			chord: false,
+		});
+	}
+	return rests;
+}
+
 /** Local line position (raw y) of a staff line at column x. */
 function lineYRawAt(staff, lineIndex, x, skewTan) {
 	let yPrime = staff.lineYs[lineIndex];
@@ -762,12 +860,24 @@ export function reconstructScore(masks, width, height) {
 	classifyClefs(staves, clefComponents, systems, skewTan);
 
 	const components = connectedComponents(masks.notehead, width, height);
-	const notes = componentsToNotes(components, staves, skewTan, {
+	let notes = componentsToNotes(components, staves, skewTan, {
 		ink: masks.ink,
 		stemsRests: masks.stemsRests,
 		width,
 		height,
 	});
+
+	// Rest glyphs from the stems/rests mask, merged into the event stream
+	// at their real x so they sit correctly inside measures
+	if (masks.stemsRests) {
+		const rests = componentsToRests(
+			connectedComponents(masks.stemsRests, width, height),
+			staves,
+			skewTan,
+			{ noteheadMask: masks.notehead, width, height },
+		);
+		notes = [...notes, ...rests].sort((a, b) => a.staff - b.staff || a.x - b.x);
+	}
 
 	// Barlines → real measures, shared within each system so the two hands
 	// of a grand staff always agree on the measure count

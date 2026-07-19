@@ -60,12 +60,13 @@ function report(label, score) {
 	for (const [i, staff] of score.staves.entries()) {
 		const staffNotes = score.notes.filter((note) => note.staff === i);
 		const chords = staffNotes.filter((note) => note.chord).length;
+		const rests = staffNotes.filter((note) => note.rest).length;
 		const measures =
 			staffNotes.length > 0
 				? Math.max(...staffNotes.map((n) => (n.measure ?? 0) + 1))
 				: 0;
 		console.log(
-			`  staff ${i}: top=${staff.top.toFixed(0)} unit=${staff.unitSize.toFixed(1)} clef=${staff.clef} notes=${staffNotes.length} (chords: ${chords}) barlines=${staff.barlineXs?.length ?? 0} measures=${measures}`,
+			`  staff ${i}: top=${staff.top.toFixed(0)} unit=${staff.unitSize.toFixed(1)} clef=${staff.clef} notes=${staffNotes.length} (chords: ${chords}, rests: ${rests}) barlines=${staff.barlineXs?.length ?? 0} measures=${measures}`,
 		);
 	}
 }

@@ -3,6 +3,7 @@ import {
 	assignMeasures,
 	classifyClefs,
 	componentsToNotes,
+	componentsToRests,
 	connectedComponents,
 	detectBarlines,
 	detectStaves,
@@ -198,6 +199,66 @@ describe("chord splitting", () => {
 		// Heads on adjacent lines 110 and 120: D5 and B4 (a third apart)
 		const steps = notes.map((n) => `${n.step}${n.octave}`).sort();
 		expect(steps).toEqual(["B4", "D5"]);
+	});
+});
+
+describe("componentsToRests", () => {
+	// Staff: top=100, unit=10, lines at 100,110,120,130,140
+	const staff = staffAt(100);
+
+	function blob(x1, y1, w, h, areaRatio = 0.6) {
+		return {
+			x1,
+			y1,
+			x2: x1 + w - 1,
+			y2: y1 + h - 1,
+			cx: x1 + w / 2,
+			cy: y1 + h / 2,
+			area: w * h * areaRatio,
+		};
+	}
+
+	it("classifies a tall zigzag as a quarter rest", () => {
+		// ~0.8u wide, 3u tall, centered mid-staff
+		const rests = componentsToRests([blob(200, 105, 8, 30)], [staff]);
+		expect(rests.length).toBe(1);
+		expect(rests[0]).toMatchObject({ duration: "quarter", rest: true });
+		expect(rests[0].x).toBeCloseTo(204, 0);
+	});
+
+	it("classifies box rests by line position (whole vs half)", () => {
+		// Whole rest: box hanging below lineYs[1]=110 → y 111..115
+		const whole = componentsToRests([blob(200, 111, 12, 5)], [staff]);
+		expect(whole[0].duration).toBe("whole");
+		// Half rest: box sitting on lineYs[2]=120 → y 115..119
+		const half = componentsToRests([blob(300, 115, 12, 5)], [staff]);
+		expect(half[0].duration).toBe("half");
+	});
+
+	it("rejects stems (thin) and beams (wide)", () => {
+		const stem = blob(200, 105, 3, 35); // 0.3u wide vertical
+		const beam = blob(200, 115, 40, 6); // 4u wide flat
+		expect(componentsToRests([stem, beam], [staff])).toEqual([]);
+	});
+
+	it("rejects components attached to noteheads", () => {
+		const width = 400;
+		const height = 200;
+		const noteheadMask = new Uint8Array(width * height);
+		// Notehead right below the candidate
+		for (let y = 136; y < 144; y++) {
+			for (let x = 198; x < 208; x++) {
+				noteheadMask[y * width + x] = 1;
+			}
+		}
+		const candidate = blob(200, 105, 8, 30);
+		expect(
+			componentsToRests([candidate], [staff], 0, {
+				noteheadMask,
+				width,
+				height,
+			}),
+		).toEqual([]);
 	});
 });
 

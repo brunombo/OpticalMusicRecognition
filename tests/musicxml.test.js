@@ -108,6 +108,27 @@ describe("buildMusicXml", () => {
 		expect(durations(partXml[1], 1)).toBe(durations(partXml[2], 1));
 	});
 
+	it("emits detected rest events inline at their position", () => {
+		const xml = buildMusicXml({
+			staves: [{ clef: "treble", barlineXs: [500] }],
+			systems: [[0]],
+			notes: [
+				{ staff: 0, step: "C", octave: 5, duration: "quarter", measure: 0 },
+				{ staff: 0, duration: "quarter", rest: true, measure: 0 },
+				{ staff: 0, step: "D", octave: 5, duration: "half", measure: 0 },
+			],
+		});
+		// The rest sits between the two notes, not appended at the end
+		const measure = xml.split("<measure ")[1];
+		const restIndex = measure.indexOf("<rest/>");
+		const noteC = measure.indexOf("<step>C</step>");
+		const noteD = measure.indexOf("<step>D</step>");
+		expect(restIndex).toBeGreaterThan(noteC);
+		expect(restIndex).toBeLessThan(noteD);
+		// 1 + 1 + 2 beats = 4: no padding rests beyond the detected one
+		expect((xml.match(/<rest\/>/g) ?? []).length).toBe(1);
+	});
+
 	it("renders half and whole note types", () => {
 		const xml = buildMusicXml({
 			staves: [{ clef: "treble" }],

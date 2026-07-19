@@ -42,6 +42,9 @@ function noteXml(note, divisions) {
 	const duration = Math.round(
 		(DURATION_DIVISIONS[note.duration] ?? 1) * divisions,
 	);
+	if (note.rest) {
+		return `<note><rest/><duration>${duration}</duration><type>${escapeXml(note.duration)}</type></note>`;
+	}
 	return [
 		"<note>",
 		note.chord ? "<chord/>" : "",
