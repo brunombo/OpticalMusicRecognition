@@ -421,6 +421,220 @@ image-to-sequence reader recovers rhythm better on these photos (96.5) — a
 permissively licensed model of that kind would be worth adding as a second
 engine.
 
+## 8. Page capture: find the page, flatten it, clean it (plan, 2026-11-09)
+
+**Goal.** From a phone photo (`test_images/Rondo-MuzioClementi-original-*.png`)
+produce the scanner-style page (`Rondo-MuzioClementi-*.png`) automatically:
+detect the page's corners, rectify it, and whiten / sharpen it while keeping
+coloured annotations.
+
+### 8.1 What the target actually is (measured)
+
+SIFT + RANSAC registration of each clean page onto its original
+(dev script, OpenCV): **a single homography explains the clean page** —
+median residual 0.30 px, 95th percentile 1.3 px on ~370 inliers per page.
+So the reference was made by a 4-corner perspective crop (no curl
+correction), followed by a photometric step:
+
+| | page background (median grey) | ink (5th percentile) |
+|---|---|---|
+| original, rectified | 150–161, tinted, shadowed | 49–58 |
+| clean | 255 | 8–9 |
+
+Colours (orange pencil, blue pen) are kept and look saturated. The crop
+follows the paper edge and, on the binding side, includes the spiral.
+Reference corner quads (original pixel coordinates, TL TR BR BL):
+page 0 `(5,52) (537,28) (547,785) (4,790)`, page 1 `(21,19) (553,33)
+(580,766) (26,771)`, page 2 `(26,59) (533,21) (545,764) (14,754)`.
+
+**Recognition baseline (no preprocessing).** The reader already copes with
+the raw photos — copista finds its own staves — so the gain from this work
+is mostly the cleaned page (display, export) and robustness on harder
+photos; recognition must simply **not regress**:
+
+| input | 2m pitch / pitch+rhythm F1 | 28m pitch / pitch+rhythm F1 |
+|---|---|---|
+| clean pages | 97.9 / 94.7 | 99.0 / 93.0 |
+| raw originals | 97.3 / 93.8 (p1: 94.3 / 87.7) | 98.4 / 92.4 |
+
+### 8.2 Literature
+
+**Page (corner) detection.**
+- Classical: edges + largest 4-vertex contour, or Hough / LSD line
+  segments grouped into a quadrilateral — the approach of most open
+  scanner code (e.g. jscanify, MIT, on OpenCV.js). Fails when the page
+  edge has low contrast, is partly off-frame, or a neighbouring page shares
+  an edge — all three happen here (opposite page of the booklet, spiral
+  binding, page 0's top edge close to the frame).
+- Learned: SmartDoc 2015 (ICDAR) is the standard benchmark; Dropbox's
+  scanner (2016) used a learned edge map + Hough. **DocAligner**
+  (DocsaidLab, Apache-2.0) predicts the 4 corners as heatmaps with mobile
+  backbones (LCNet / MobileNetV2 / FastViT), ONNX export, ~128–256 px input.
+  YOLOv8 segmentation + geometric post-processing is the 2025 hybrid
+  (arXiv 2501.03145).
+- Aspect ratio: Zhang & He (2007, whiteboard scanning) recover the true
+  width/height of a rectangle from its image quad (camera focal length from
+  the two vanishing points), better than averaging side lengths.
+- Music-specific prior: after rectification, **staff lines must be
+  horizontal and parallel and bar lines vertical**. Text-line-based
+  rectification (page_dewarp, Zucker 2016, MIT; Lu et al.; Clark & Mirmehdi)
+  uses the same idea with text; for scores it is stronger because staff
+  lines are long, straight, evenly spaced references. This lets us score
+  candidate quads and recover the perspective even when page edges are
+  missing.
+
+**Flattening beyond a homography (page curl).**
+- Learned grid regression: DocUNet (2018), DewarpNet (2019), DocTr (2021),
+  DocScanner, PaperEdge (2022), **UVDoc** (SIGGRAPH Asia 2023, MIT, small
+  grid net), DocRes (CVPR 2024, MIT, one model for dewarp / deshadow /
+  enhance / binarise, heavy), 2026: D2Dewarp (CVPR), Axis-Aligned
+  Dewarping (AAAI, lightweight), TADoc. All are trained on text documents;
+  sizes of 30–100+ MB and unclear behaviour on staff lines make them a
+  poor first choice in the browser.
+- Score-specific: Vo et al. (ICPR 2014) rectify each staff region between
+  bar lines with a biquadratic map; oemer and homr dewarp per staff from
+  their staff-line segmentation; the 2023 stave-aware camera OMR paper
+  (Applied Sciences 13(16):9360) models curvature inside detection. A
+  **staff-line mesh** (fit each staff line as a smooth curve after the
+  homography, interpolate a displacement field between staves, remap) is
+  the cheap, permissive, score-native analogue of page_dewarp.
+
+**Illumination / enhancement.**
+- Background division ("flat-field"): estimate the paper colour per region
+  with a large max / closing filter + blur, divide the image by it — the
+  core of whiteboard scanning (Zhang & He 2007) and of Bako et al. (ACCV
+  2016) document shadow removal (local background colour → gain map).
+  Removes shadows, vignetting and paper tint per channel, so colours keep
+  their hue.
+- Then levels (black / white points from ink and paper percentiles, gamma)
+  and a saturation boost on chromatic pixels — what "magic colour" scanner
+  filters do. Binarisation (Otsu, Sauvola) would destroy the coloured
+  annotations the target keeps.
+- Learned: BEDSR-Net (CVPR 2020), DocShadow (2023), GCDRNet, DocRes — better
+  on hard shadows, too heavy for this need.
+
+### 8.3 Plan
+
+**Decisions (2026-11-09):** prototype **three** corner detectors — plain
+JS, OpenCV.js, DocAligner (ONNX) — on the same harness and let the user
+choose · draggable corners in the app · page-curl correction later, kept
+only if it measurably helps · the user adds extra real photos
+(`test_images/extra/`) as a held-out set.
+
+```mermaid
+flowchart LR
+  P[photo] --> D[downscale ≤ 640 px]
+  D --> M[page mask:<br/>bright, low-chroma<br/>region around centre]
+  M --> Q[candidate quads:<br/>mask hull + edge lines<br/>+ image borders]
+  D --> S[staff-line directions]
+  Q --> V{score quads:<br/>edge support +<br/>staves horizontal}
+  S --> V
+  V --> H[homography,<br/>Zhang–He aspect]
+  H --> W[warp full res<br/>bilinear]
+  W --> B[background division<br/>per channel]
+  B --> L[levels + saturation]
+  L --> O[clean page<br/>RGB]
+  O --> R[copista reader]
+```
+
+1. **Evaluation harness first** (`scripts/eval/capture.mjs` + a uv dev
+   script for registration). For every original: corner error against the
+   reference quads above (as % of the page diagonal); appearance against the
+   clean page (SSIM of grey levels after alignment, background whiteness,
+   ink darkness, hue kept for the annotations); recognition F1 with the
+   existing scorer (`test_images/reference/manifest-original.json`).
+2. **Page detection** in JS on a ≤ 640 px copy: page mask (bright,
+   low-chroma, connected to the centre, ink removed by a closing) → convex
+   hull → quadrilateral fits; plus gradient line segments near the mask
+   border; image borders allowed as sides when the page leaves the frame.
+   Each candidate is scored by edge support and by how horizontal and
+   parallel the staff lines become after rectification; refine the chosen
+   lines at full resolution.
+3. **Rectify**: homography from the 4 corners, output size from the
+   Zhang–He aspect (fallback: mean side lengths), bilinear warp at full
+   resolution.
+4. **Clean**: per-channel background estimation at low resolution (max
+   filter ≈ 2 staff spaces, then blur), division, levels from percentiles,
+   saturation boost for chromatic pixels. Gives the RGB display/export
+   image; the reader gets its grey version (or the flattened, un-levelled
+   grey, whichever scores better on *all* test sets, not just these three).
+5. **App**: run in the worker; show the photo with the detected quad,
+   draggable corners to fix a bad detection (standard in every scanner
+   app), a "flatten & clean" toggle, the cleaned page, and a download
+   button for it.
+6. **Optional — page curl**: staff-line mesh dewarp after the homography
+   (the reference does not need it, but curled pages near a binding do).
+7. **Fallback if (2) fails on real photos**: DocAligner corners (ONNX,
+   Apache-2.0) as a second candidate generator.
+
+### 8.4 Acceptance
+
+- Corners within **2 % of the page diagonal** of the reference quads on all
+  three originals.
+- Cleaned page close to the reference: grey-level SSIM well above the
+  rectified-but-uncleaned original, background ≥ 245 on ≥ 95 % of
+  paper pixels, ink 5th percentile ≤ 30, orange / blue annotations keep their
+  hue.
+- Recognition on cleaned originals ≥ raw originals on every page, and no
+  change (within noise) on already-clean inputs.
+- **Against overfitting:** no parameter tuned to a single page; idempotent on
+  the clean pages, `test.png` and the clean render (no crop, no warp beyond
+  a few pixels); synthetic set — the clean render and pages pasted on varied
+  backgrounds with random homographies, lighting gradients and shadows —
+  ≥ 95 % of corners recovered within 2 %; plus any extra real photos.
+- Speed: detection < 300 ms, warp + clean < 1 s for a 12 MP photo
+  (desktop).
+
+### 8.5 Risks
+
+- Binding side: the spiral and the facing page make that edge ambiguous —
+  the reference includes the spiral; we accept either the spiral's outer
+  edge or the paper edge if within tolerance.
+- Pages without visible edges (close-up photos): fall back to staff-based
+  rectification (perspective from staff / bar-line directions) and a crop to
+  the content.
+- Over-whitening faint pencil: the levels step must not clip light
+  annotations or thin staff lines at low resolution (these images are only
+  ~790 px high; staff space ≈ 7 px).
+
+### 8.6 Results (2026-11-10)
+
+**Corner detectors** (13 photos, max corner error ≤ 2 % of the diagonal;
+the 10 extra photos have hand-marked references, ±5 px ≈ 1 %):
+
+| Detector | Page found | ≤ 2 % | Mean max error | Time | Size |
+|---|---|---|---|---|---|
+| DocAligner lcnet100 | 13/13 | 3/13 | 2.9 % | ~30 ms | 4.8 MB |
+| Plain JS, staff-aware (+ edge refine) | 13/13 | 1/13 | 6.4 % | ~400 ms | 0 |
+| OpenCV.js, contour pipeline | 10/13 | 0/13 | 34 % | ~10 ms | 10.4 MB |
+
+Snapping the sides to nearby edges did not help any detector (it jumps to
+shadow and crease edges). **Chosen: DocAligner** (mirrored on Hugging Face,
+`npm run fetch:docaligner`), with draggable corners for its misses (Rondo-0:
+bottom-left corner 75 px off, cutting the last system).
+
+**Flattening**: Zhang–He aspect ratio, with a phone focal length (0.72 × long
+side) assumed when a pair of sides is parallel in the photo (the focal length
+is then not measurable). **Cleaning**: per-channel background division, then
+levels with a white point measured on the page (median − 4σ of the paper
+ratio, clamped to 0.78…0.95) so thin, blurred staff lines survive.
+
+**Recognition** (2m, Rondo photos, pitch F1 / full F1; raw photos 97.3 / 93.8):
+
+| Input | F1 |
+|---|---|
+| Reference corners, flattened only | 96.7 / 93.5 |
+| Reference corners, scan-like cleaning | 95.1 / 91.5 |
+| Reference corners, gentle cleaning (division only) | 96.5 / 93.3 |
+| DocAligner corners, gentle cleaning | 93.7 / 90.0 (Rondo-0's bad corner) |
+| Clean scans through capture (should be a no-op) | 96.8 / 93.3 (clean scans directly: 97.9 / 94.7) |
+
+The recognizer is already robust to lighting, so the app *shows and
+downloads* the scan-like page but *reads* the gently cleaned one. Capture is
+on by default with a checkbox to switch it off for scans. Open: a check that
+the outline does not cut through staff lines (would catch Rondo-0), and page
+curl (§8.3 step 7).
+
 ## Sources (November 2026 update)
 
 - copisteria · https://github.com/kobimusic/copisteria · weights https://huggingface.co/kobimusic/copista-2m, https://huggingface.co/kobimusic/copista-28m (Apache-2.0)
@@ -432,3 +646,19 @@ engine.
 - Sheet Music Benchmark · arXiv:2506.10488 · https://huggingface.co/datasets/PRAIG/SMB
 - Sheetly OMR benchmark (vendor, unverified) · https://www.trysheetly.com/compare/omr-benchmark
 - Reference MIDI: IMSLP #218430 (WIMA, public domain) · https://imslp.org/wiki/6_Sonatinas,_Op.36_(Clementi,_Muzio)
+
+## Sources (page capture, §8)
+
+- DocAligner (Apache-2.0) · https://github.com/DocsaidLab/DocAligner · https://pypi.org/project/docaligner-docsaid/
+- YOLOv8 + cubic-polynomial dewarping · arXiv:2501.03145
+- jscanify (MIT, OpenCV.js) · https://github.com/ColonelParrot/jscanify
+- page_dewarp, cubic sheet model from text lines (MIT) · https://github.com/mzucker/page_dewarp
+- UVDoc, neural grid-based unwarping (MIT) · https://github.com/tanguymagne/UVDoc
+- DocRes, generalist restoration (MIT) · https://github.com/ZZZHANG-jx/DocRes · arXiv:2405.04408
+- DocTr / DocScanner (licence unclear) · https://github.com/fh2019ustc/DocTr · https://github.com/fh2019ustc/DocScanner
+- D2Dewarp (CVPR 2026) · https://openaccess.thecvf.com/content/CVPR2026/html/Li_D2Dewarp_Dual_Dimensions_Geometric_Representation_Learning_Based_Document_Image_Dewarping_CVPR_2026_paper.html
+- Axis-Aligned Document Dewarping (AAAI 2026) · arXiv:2507.15000 · TADoc · arXiv:2508.06988
+- Stave-aware camera OMR, CPMS dataset · Applied Sciences 13(16):9360 (2023) · https://www.mdpi.com/2076-3417/13/16/9360
+- Vo et al., distorted music score recognition without staff-line removal (ICPR 2014)
+- Zhang & He, whiteboard scanning and image enhancement (Digital Signal Processing, 2007)
+- Bako et al., removing shadows from images of documents (ACCV 2016)

@@ -1,8 +1,14 @@
-// Recognition Web Worker: runs the whole reader off the main thread so the
-// UI stays responsive. One message in ({ id, size, image }), progress and
-// result messages out. ONNX sessions stay cached across runs.
+// Recognition Web Worker: runs the heavy work off the main thread so the UI
+// stays responsive. One message in ({ id, task, ... }), progress and result
+// messages out. ONNX sessions stay cached across runs.
+//   task "detect":     { image }            → corners (TL, TR, BR, BL) or null
+//   task "flatten":    { image, quad, tone } → the flattened, cleaned page
+//   task "recognize":  { size, image, quad? } → { musicXml, summary, symbols }
+//                      (with a quad, the page inside it is flattened and
+//                      evened out first, see capture/index.js)
 
-import { describeError, recognize } from "./engine.js";
+import { flattenAndClean } from "./capture/index.js";
+import { describeError, detectPage, recognize } from "./engine.js";
 
 let current = null; // the run in progress, for errors raised outside it
 
@@ -17,15 +23,37 @@ self.addEventListener("unhandledrejection", (event) => {
 	fail(current, event.reason);
 });
 
+async function run(message, onProgress) {
+	switch (message.task) {
+		case "detect":
+			return detectPage(message.image, { onProgress });
+		case "flatten":
+			return flattenAndClean(message.image, message.quad, {
+				tone: message.tone,
+			});
+		case "recognize": {
+			const page = message.quad
+				? flattenAndClean(message.image, message.quad, { tone: "reading" })
+				: message.image;
+			return recognize(message.size, page, { onProgress });
+		}
+		default:
+			throw new Error(`unknown task ${message.task}`);
+	}
+}
+
 self.onmessage = async (event) => {
-	const { id, size, image } = event.data;
+	const { id } = event.data;
 	current = id;
-	const post = (message) => self.postMessage({ id, ...message });
+	const post = (message, transfer) =>
+		self.postMessage({ id, ...message }, transfer ?? []);
 	try {
-		const result = await recognize(size, image, {
-			onProgress: (progress) => post({ type: "progress", progress }),
-		});
-		post({ type: "result", result });
+		const result = await run(event.data, (progress) =>
+			post({ type: "progress", progress }),
+		);
+		// pixels are moved, not copied
+		const pixels = result?.data instanceof Uint8ClampedArray;
+		post({ type: "result", result }, pixels ? [result.data.buffer] : []);
 	} catch (error) {
 		fail(id, error);
 	}

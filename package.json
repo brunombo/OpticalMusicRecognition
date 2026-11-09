@@ -9,6 +9,7 @@
 		"build": "vite build",
 		"preview": "vite preview",
 		"fetch:models": "uv run scripts/models/export_copista.py",
+		"fetch:docaligner": "uv run scripts/models/fetch_docaligner.py",
 		"test": "vitest run",
 		"test:watch": "vitest",
 		"lint": "biome check .",

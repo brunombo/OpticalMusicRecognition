@@ -1,0 +1,18 @@
+{
+	"about": "Reference page corners (TL, TR, BR, BL) in image pixels. Rondo originals: from SIFT+RANSAC registration of the clean page onto the photo (exact, the clean pages are a homography of the photo). MyHeartWillGoOn: hand-marked on zoomed crops, about +-5 px; the page is the sheet carrying the central music, its binding-side edge is the fold of that sheet.",
+	"pages": {
+		"Rondo-MuzioClementi-original-0": [[5, 52], [537, 28], [547, 785], [4, 790]],
+		"Rondo-MuzioClementi-original-1": [[21, 19], [553, 33], [580, 766], [26, 771]],
+		"Rondo-MuzioClementi-original-2": [[26, 59], [533, 21], [545, 764], [14, 754]],
+		"extra/MyHeartWillGoOn-original-0": [[48, 65], [477, 70], [481, 694], [43, 690]],
+		"extra/MyHeartWillGoOn-original-1": [[50, 54], [503, 55], [540, 737], [50, 742]],
+		"extra/MyHeartWillGoOn-original-2": [[61, 44], [526, 50], [527, 712], [58, 718]],
+		"extra/MyHeartWillGoOn-original-3": [[50, 47], [512, 53], [516, 711], [42, 718]],
+		"extra/MyHeartWillGoOn-original-4": [[60, 84], [510, 86], [514, 745], [47, 742]],
+		"extra/MyHeartWillGoOn-original-5": [[43, 62], [498, 68], [500, 738], [20, 752]],
+		"extra/MyHeartWillGoOn-original-6": [[97, 100], [505, 100], [526, 713], [87, 722]],
+		"extra/MyHeartWillGoOn-original-7": [[73, 90], [505, 93], [508, 719], [50, 716]],
+		"extra/MyHeartWillGoOn-original-8": [[72, 84], [507, 89], [505, 711], [63, 722]],
+		"extra/MyHeartWillGoOn-original-9": [[70, 88], [523, 90], [522, 738], [50, 750]]
+	}
+}

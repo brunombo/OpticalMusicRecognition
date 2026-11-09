@@ -1,4 +1,5 @@
-// Pipeline API for the UI: image → recognition in a Web Worker → MusicXML.
+// Pipeline API for the UI: photo → page capture (corners, flatten, clean)
+// → recognition in a Web Worker → MusicXML.
 // The worker runs copisteria's reader (JavaScript port) with the copista
 // networks in ONNX Runtime Web; two detector sizes are offered.
 
@@ -41,11 +42,8 @@ function getWorker() {
 	return worker;
 }
 
-/**
- * Recognize an image with a detector size ("2m" or "28m").
- * @returns {Promise<{ musicXml: string, summary: object, symbols: object[] }>}
- */
-export function runPipeline(size, image, { onProgress } = {}) {
+/** Run a task in the worker (see worker.js); the image is copied, not moved. */
+function call(task, payload, { onProgress } = {}) {
 	const w = getWorker();
 	const id = ++nextRunId;
 	return new Promise((resolve, reject) => {
@@ -80,15 +78,41 @@ export function runPipeline(size, image, { onProgress } = {}) {
 		};
 		w.addEventListener("message", onMessage);
 		w.addEventListener("error", onError);
-		// A copy keeps the caller's image usable for re-runs
-		w.postMessage({
-			id,
-			size,
-			image: {
-				data: image.data.slice(),
-				width: image.width,
-				height: image.height,
-			},
-		});
+		w.postMessage({ id, task, ...payload });
 	});
+}
+
+// A copy keeps the caller's image usable for later runs
+const copy = (image) => ({
+	data: image.data.slice(),
+	width: image.width,
+	height: image.height,
+});
+// plain arrays (a reactive proxy cannot be posted to a worker)
+const plainQuad = (quad) => (quad ? quad.map(([x, y]) => [x, y]) : null);
+
+/**
+ * Recognize an image with a detector size ("2m" or "28m"); with `quad`, the
+ * page inside it is flattened and its lighting evened out first.
+ * @returns {Promise<{ musicXml: string, summary: object, symbols: object[] }>}
+ */
+export function runPipeline(size, image, { quad = null, onProgress } = {}) {
+	return call(
+		"recognize",
+		{ size, image: copy(image), quad: plainQuad(quad) },
+		{ onProgress },
+	);
+}
+
+/**
+ * The page's corners in a photo (TL, TR, BR, BL, image pixels), or null when
+ * no page is found.
+ */
+export function detectPageCorners(image, { onProgress } = {}) {
+	return call("detect", { image: copy(image) }, { onProgress });
+}
+
+/** The page inside `quad`, flattened and cleaned like a scan. */
+export function flattenPage(image, quad, { tone = "scan" } = {}) {
+	return call("flatten", { image: copy(image), quad: plainQuad(quad), tone });
 }

@@ -9,6 +9,7 @@ import ortMjsUrl from "onnxruntime-web/ort-wasm-simd-threaded.jsep.mjs?url";
 // Vite-resolved URLs for ORT's WASM runtime (the .mjs glue must not live in
 // /public: Vite forbids importing from there)
 import ortWasmUrl from "onnxruntime-web/ort-wasm-simd-threaded.jsep.wasm?url";
+import { DOCALIGNER_FILE, detectCorners } from "./capture/docaligner.js";
 import { rgbaToGray } from "./copisteria/image.js";
 import { recognizedSymbols, recognizePage } from "./copisteria/index.js";
 import { createModels, META_FILE, modelFiles } from "./copisteria/runtime.js";
@@ -77,7 +78,7 @@ async function download(url, onProgress) {
 			const response = await fetch(url);
 			if (!response.ok) {
 				throw new Error(
-					`Model download failed (${response.status}): ${url} — run \`npm run fetch:models\``,
+					`Model download failed (${response.status}): ${url} — run \`npm run fetch:models\` and \`npm run fetch:docaligner\``,
 				);
 			}
 			return await readBody(response, onProgress);
@@ -313,4 +314,26 @@ export async function recognize(size, image, { onProgress } = {}) {
 			changed: symbols.filter((s) => s.changed).length,
 		},
 	};
+}
+
+let docAligner = null;
+
+/**
+ * The page's corners in a photo (DocAligner), or null when no page is
+ * found. The 4.8 MB model is fetched and cached like the copista models.
+ * @returns {Promise<number[][] | null>} TL, TR, BR, BL in image pixels
+ */
+export async function detectPage(image, { onProgress } = {}) {
+	docAligner ??= (async () => {
+		await loadMeta(); // opens the model cache
+		const bytes = await fetchCached(DOCALIGNER_FILE, (ratio) =>
+			onProgress?.({ stage: `downloading ${DOCALIGNER_FILE}`, ratio }),
+		);
+		return createSession(bytes, false);
+	})().catch((error) => {
+		docAligner = null;
+		throw error;
+	});
+	const session = await docAligner;
+	return detectCorners(await loadOrt(), session, image);
 }

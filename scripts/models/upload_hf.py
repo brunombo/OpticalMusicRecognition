@@ -2,7 +2,7 @@
 # requires-python = ">=3.12"
 # dependencies = ["huggingface_hub", "typer", "rich"]
 # ///
-"""Publish the exported ONNX models (public/models/, from export_copista.py) to a Hugging Face model repo,
+"""Publish the exported ONNX models (public/models/, from export_copista.py and fetch_docaligner.py) to a Hugging Face model repo,
 from which the deployed app loads them (VITE_MODELS_URL).
 
 Needs a Hugging Face login with write access: `uvx hf auth login` (or HF_TOKEN in the environment).
@@ -36,9 +36,9 @@ base_model:
 - kobimusic/copista-28m
 ---
 
-# MusicOCR models (copista, ONNX)
+# MusicOCR models (copista and DocAligner, ONNX)
 
-ONNX exports of KobiMusic's **copista** networks, used by
+ONNX exports of KobiMusic's **copista** networks, and a mirror of DocsaidLab's **DocAligner** page-corner model, used by
 [MusicOCR](https://github.com/pauldubois98/OpticalMusicRecognition), a fully client-side sheet-music
 recognizer that runs in the browser with ONNX Runtime Web.
 
@@ -48,6 +48,7 @@ recognizer that runs in the browser with ONNX Runtime Web.
 | `copista-28m-trunk.onnx`, `copista-28m-verifier.onnx` | copista-28m symbol detector, same split |
 | `copista-evidence.onnx` | copisteria's 2M-parameter evidence model |
 | `copista-meta.json` | class list, attribute vocabularies, decoding constants |
+| `docaligner-lcnet100.onnx` | DocAligner page-corner detector (`lcnet100_h_e_bifpn_256_fp32`): image [1,3,256,256] → 4 corner heatmaps [1,4,128,128] |
 
 Source: {source}. Converted with
 [`scripts/models/export_copista.py`](https://github.com/pauldubois98/OpticalMusicRecognition/blob/main/scripts/models/export_copista.py);
@@ -60,6 +61,10 @@ Apache License 2.0, like the original weights
 [kobimusic/copista-28m](https://huggingface.co/kobimusic/copista-28m)) and code
 ([kobimusic/copisteria](https://github.com/kobimusic/copisteria)). These files are converted (modified) copies of
 KobiMusic's weights; see `NOTICE`.
+
+`docaligner-lcnet100.onnx` is an unmodified copy of DocsaidLab's
+[DocAligner](https://github.com/DocsaidLab/DocAligner) model (Apache License 2.0, `LICENSE-DocAligner`), mirrored here
+because the original is only published on Google Drive, which browsers cannot load from.
 """
 
 NOTICE = """copista ONNX exports
@@ -70,6 +75,10 @@ copisteria, https://github.com/kobimusic/copisteria
 
 The weights (kobimusic/copista-2m, kobimusic/copista-28m, Apache-2.0, Copyright 2026 KobiMusic) were converted from
 PyTorch to ONNX (the verifier's transformer re-expressed with the same weights for dynamic shapes).
+
+docaligner-lcnet100.onnx
+Unmodified copy of DocAligner's lcnet100_h_e_bifpn_256_fp32.onnx (docaligner-docsaid 1.1.1), by DocsaidLab,
+https://github.com/DocsaidLab/DocAligner, Apache License 2.0 (see LICENSE-DocAligner).
 """
 
 
@@ -83,6 +92,8 @@ def main(
     meta_path = models / "copista-meta.json"
     if not meta_path.exists():
         raise SystemExit(f"{meta_path} not found: run `npm run fetch:models` first")
+    if not (models / "docaligner-lcnet100.onnx").exists():
+        raise SystemExit("docaligner-lcnet100.onnx not found: run `npm run fetch:docaligner` first")
     files = sorted(p.name for p in models.glob("*.onnx")) + ["copista-meta.json"]
     source = json.loads(meta_path.read_text())["source"]
     api = HfApi()
@@ -93,6 +104,7 @@ def main(
     (stage / "README.md").write_text(CARD.replace("{source}", source))
     (stage / "NOTICE").write_text(NOTICE)
     (stage / "LICENSE").write_text((ROOT / "LICENSES" / "copisteria-Apache-2.0.txt").read_text())
+    (stage / "LICENSE-DocAligner").write_text((ROOT / "LICENSES" / "docaligner-Apache-2.0.txt").read_text())
     api.upload_folder(repo_id=repo, folder_path=stage, commit_message="Model card, license, notice")
     api.upload_folder(
         repo_id=repo,
