@@ -69,7 +69,14 @@ export function runPipeline(size, image, { onProgress } = {}) {
 		};
 		const onError = (event) => {
 			cleanup();
-			reject(new Error(event.message ?? "Recognition worker crashed"));
+			// an empty message usually means the worker died (out of memory)
+			reject(
+				new Error(
+					event.message ||
+						"The recognition worker crashed (likely out of memory — try the fast model or a smaller photo)",
+				),
+			);
+			worker = null; // a crashed worker is not reused
 		};
 		w.addEventListener("message", onMessage);
 		w.addEventListener("error", onError);

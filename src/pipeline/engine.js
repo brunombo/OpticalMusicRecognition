@@ -116,6 +116,44 @@ function withTimeout(promise, ms, label) {
 	});
 }
 
+/** A readable description of anything thrown (ONNX Runtime Web may throw strings or numbers). */
+export function describeError(error) {
+	if (error instanceof Error) {
+		return error.message || error.name || "unknown error";
+	}
+	return String(error ?? "unknown error");
+}
+
+/**
+ * A session that starts on WebGPU and moves to WASM when a run fails there
+ * (a large page can exceed the GPU's buffer limits — the 28m detector's
+ * first feature maps are over 128 MB — or the device can be lost): the
+ * failed run is repeated on WASM, and later runs stay there.
+ */
+export function gpuWithFallback(rt, bytes, session) {
+	let current = session;
+	let onGpu = true;
+	return {
+		async run(feeds) {
+			if (!onGpu) {
+				return current.run(feeds);
+			}
+			try {
+				return await current.run(feeds);
+			} catch (error) {
+				console.warn(
+					`WebGPU run failed (${describeError(error)}), running on WASM instead`,
+				);
+				onGpu = false;
+				current = await rt.InferenceSession.create(bytes, {
+					executionProviders: ["wasm"],
+				});
+				return current.run(feeds);
+			}
+		},
+	};
+}
+
 async function createSession(bytes, gpu) {
 	const rt = await loadOrt();
 	if (
@@ -135,9 +173,11 @@ async function createSession(bytes, gpu) {
 				"WebGPU session creation",
 			);
 			webgpuUsable = true;
-			return session;
+			return gpuWithFallback(rt, bytes, session);
 		} catch (error) {
-			console.warn(`WebGPU unusable, falling back to WASM: ${error.message}`);
+			console.warn(
+				`WebGPU unusable, falling back to WASM: ${describeError(error)}`,
+			);
 			webgpuUsable = false;
 		}
 	}
