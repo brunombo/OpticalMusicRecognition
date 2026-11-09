@@ -1,8 +1,28 @@
+import { fileURLToPath } from "node:url";
 import vue from "@vitejs/plugin-vue";
 import { defineConfig } from "vite";
 
-export default defineConfig({
+export default defineConfig(({ command }) => ({
 	plugins: [vue()],
+	resolve: {
+		// Verovio imports node:module only when running under Node; the
+		// browser bundle gets a stub (tests and node scripts keep the real one)
+		alias:
+			command === "build"
+				? {
+						"node:module": fileURLToPath(
+							new URL("./src/node-module-stub.js", import.meta.url),
+						),
+					}
+				: {},
+	},
+	build: {
+		// verovio-module (~7.5 MB) is Verovio's WASM embedded in JS; it is
+		// already lazy-loaded via dynamic import() and cannot be split
+		// further. The limit sits just above it so any other oversized chunk
+		// still warns.
+		chunkSizeWarningLimit: 8000,
+	},
 	// COOP/COEP headers enable SharedArrayBuffer → multithreaded ONNX WASM
 	server: {
 		port: 3000,
@@ -29,4 +49,4 @@ export default defineConfig({
 		environment: "node",
 		include: ["tests/**/*.test.js"],
 	},
-});
+}));
