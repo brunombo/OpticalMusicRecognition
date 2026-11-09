@@ -1,4 +1,8 @@
 /*! coi-serviceworker v0.1.7 - Guido Zuidhof and contributors, licensed under MIT */
+// Modified for MusicOCR: requests for the ONNX models (…/models/…) are not
+// intercepted. They are same-origin (no header needed under COEP), and a
+// 100 MB download streamed through the worker is aborted when the browser
+// stops the worker mid-way (Firefox: NS_BINDING_ABORTED).
 let coepCredentialless = false;
 if (typeof window === 'undefined') {
     self.addEventListener("install", () => self.skipWaiting());
@@ -25,6 +29,9 @@ if (typeof window === 'undefined') {
         const r = event.request;
         if (r.cache === "only-if-cached" && r.mode !== "same-origin") {
             return;
+        }
+        if (new URL(r.url).pathname.includes("/models/")) {
+            return; // MusicOCR: let the network serve model files directly
         }
 
         const request = (coepCredentialless && r.mode === "no-cors")

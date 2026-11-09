@@ -70,22 +70,48 @@ async function readBody(response, onProgress) {
 	return bytes;
 }
 
-/** Fetch a model file through the model cache, reporting download progress. */
-async function fetchCached(file, onProgress) {
-	const url = MODELS_URL + file;
-	let response = modelCache ? await modelCache.match(url) : undefined;
-	if (!response) {
-		response = await fetch(url);
-		if (!response.ok) {
-			throw new Error(
-				`Model download failed (${response.status}): ${url} — run \`npm run fetch:models\``,
+/** Download a model file (one retry: a long download can break off). */
+async function download(url, onProgress) {
+	for (let attempt = 1; ; attempt++) {
+		try {
+			const response = await fetch(url);
+			if (!response.ok) {
+				throw new Error(
+					`Model download failed (${response.status}): ${url} — run \`npm run fetch:models\``,
+				);
+			}
+			return await readBody(response, onProgress);
+		} catch (error) {
+			if (attempt >= 2 || String(error).includes("npm run fetch:models")) {
+				throw error;
+			}
+			console.warn(
+				`Download of ${url} broke off (${describeError(error)}), retrying`,
 			);
 		}
-		if (modelCache) {
-			await modelCache.put(url, response.clone());
+	}
+}
+
+/**
+ * A model file, from the model cache or the network. It is downloaded in
+ * full, then stored: storing is best effort (a full quota or a private
+ * window only means it is downloaded again next time).
+ */
+async function fetchCached(file, onProgress) {
+	const url = MODELS_URL + file;
+	const cached = modelCache ? await modelCache.match(url) : undefined;
+	if (cached) {
+		return readBody(cached, onProgress);
+	}
+	const bytes = await download(url, onProgress);
+	if (modelCache) {
+		try {
+			await modelCache.put(url, new Response(bytes));
+		} catch (error) {
+			console.warn(`Could not cache ${file}: ${describeError(error)}`);
 		}
 	}
-	return readBody(response, onProgress);
+	return bytes;
 }
 
 /** A short hash of a string (FNV-1a), for naming the model cache. */
