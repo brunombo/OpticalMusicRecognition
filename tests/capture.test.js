@@ -4,7 +4,7 @@ import {
 	docAlignerInput,
 	heatmapPeak,
 } from "../src/pipeline/capture/docaligner.js";
-import { enhancePage } from "../src/pipeline/capture/enhance.js";
+import { enhancePage, toneParams } from "../src/pipeline/capture/enhance.js";
 import { applyH, homography } from "../src/pipeline/capture/geometry.js";
 import { flattenAndClean, fullQuad } from "../src/pipeline/capture/index.js";
 import {
@@ -146,6 +146,35 @@ describe("page cleaning", () => {
 		expect(at(190, 10)).toBeGreaterThanOrEqual(250); // bright paper
 		expect(at(30, 40)).toBeLessThan(40); // ink in the shadow
 		expect(at(170, 40)).toBeLessThan(40); // ink in the light
+	});
+
+	it("maps the cleaning strength from gentle (0) to scan-like (1) and beyond", () => {
+		expect(toneParams(0, 0.9)).toEqual({
+			white: 0.97,
+			black: 0,
+			gamma: 1,
+			saturation: 1,
+		});
+		const scan = toneParams(1, 0.9);
+		expect(scan.white).toBeCloseTo(0.9);
+		expect(scan.black).toBeCloseTo(0.25);
+		expect(scan.gamma).toBeCloseTo(1.3);
+		// harsher above 1, and the curve never collapses
+		const harsh = toneParams(2, 0.9);
+		expect(harsh.white).toBeLessThan(scan.white);
+		expect(harsh.black).toBeGreaterThan(scan.black);
+		expect(harsh.white - harsh.black).toBeGreaterThanOrEqual(0.15 - 1e-9);
+	});
+
+	it("darkens ink more as the strength grows", () => {
+		const image = solidImage(60, 60, [160, 160, 160]);
+		for (let x = 0; x < 60; x++) {
+			image.data.set([90, 90, 90], 4 * (30 * 60 + x)); // a faint line
+		}
+		const line = (strength) =>
+			enhancePage(image, { strength }).data[4 * (30 * 60 + 30)];
+		expect(line(0)).toBeGreaterThan(line(1));
+		expect(line(1)).toBeGreaterThan(line(2));
 	});
 
 	it("leaves a clean scan clean", () => {

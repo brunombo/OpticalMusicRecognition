@@ -5,16 +5,6 @@
 import { enhancePage } from "./enhance.js";
 import { flatSize, warpQuad } from "./warp.js";
 
-// How the flattened page is cleaned:
-//   scan     paper white, ink black, colours kept: the page shown and downloaded
-//   reading  lighting evened out only: what the recognizer reads (the strong
-//            contrast stretch of "scan" cost ~1.5 F1 on the Rondo photos)
-//   none     flattened only
-const TONES = {
-	scan: {},
-	reading: { white: 0.97, black: 0, gamma: 1, saturation: 1 },
-};
-
 /** The whole photo as a quad (TL, TR, BR, BL): the fallback when no page is found. */
 export function fullQuad(width, height) {
 	return [
@@ -25,9 +15,13 @@ export function fullQuad(width, height) {
 	];
 }
 
-/** Flatten the page inside `quad`, then clean it ("scan", "reading" or "none"). */
-export function flattenAndClean(image, quad, { tone = "scan" } = {}) {
+/**
+ * Flatten the page inside `quad`, then clean it at `strength` (0: lighting
+ * evened out only, 1: scan-like, up to 2: harsher; null: not cleaned). On the
+ * Rondo photos, recognition read ~1.5 F1 better at 0 than at 1.
+ */
+export function flattenAndClean(image, quad, { strength = 1 } = {}) {
 	const size = flatSize(quad, image.width, image.height);
 	const flat = warpQuad(image, quad, size.width, size.height);
-	return tone === "none" ? flat : enhancePage(flat, TONES[tone]);
+	return strength === null ? flat : enhancePage(flat, { strength });
 }

@@ -1,7 +1,7 @@
 // Page capture in node, as the app does it: DocAligner corners → flatten →
 // clean. Writes <out>/<name>.png for each photo (default out/capture/pages/).
 //
-// Usage: node scripts/capture/flatten.mjs [--out dir] [--tone scan|reading|none] photo.png...
+// Usage: node scripts/capture/flatten.mjs [--out dir] [--strength 0..2|none] photo.png...
 
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
@@ -12,8 +12,9 @@ import { createDocAligner } from "./detect-docaligner.mjs";
 const args = process.argv.slice(2);
 const at = args.indexOf("--out");
 const out = at < 0 ? "out/capture/pages" : args.splice(at, 2)[1];
-const toneAt = args.indexOf("--tone");
-const tone = toneAt < 0 ? "scan" : args.splice(toneAt, 2)[1];
+const strengthAt = args.indexOf("--strength");
+const strengthArg = strengthAt < 0 ? "1" : args.splice(strengthAt, 2)[1];
+const strength = strengthArg === "none" ? null : Number(strengthArg);
 const photos = args.filter((a) => !a.startsWith("--"));
 
 mkdirSync(out, { recursive: true });
@@ -29,7 +30,7 @@ for (const file of photos) {
 	});
 	const t1 = performance.now();
 	const page = flattenAndClean(image, quad ?? fullQuad(png.width, png.height), {
-		tone,
+		strength,
 	});
 	const t2 = performance.now();
 	const result = new PNG({ width: page.width, height: page.height });

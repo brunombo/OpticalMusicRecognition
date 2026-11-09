@@ -116,6 +116,25 @@ input[type="file"] {
 	margin: 0.75rem 0;
 }
 
+.slider {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.25rem 0.75rem;
+	align-items: center;
+	margin: 0 0 0.75rem;
+}
+
+.slider input[type="range"] {
+	flex: 1 1 180px;
+	max-width: 320px;
+	accent-color: var(--accent);
+}
+
+.slider output {
+	min-width: 3.5em;
+	font-variant-numeric: tabular-nums;
+}
+
 /* photo with corners | flattened page: side by side when there is room */
 .capture {
 	display: grid;
@@ -203,4 +222,9 @@ input[type="file"] {
 video {
 	max-width: 100%;
 	border-radius: 6px;
+}
+
+.slider .hint {
+	flex-basis: 100%;
+	margin: 0;
 }

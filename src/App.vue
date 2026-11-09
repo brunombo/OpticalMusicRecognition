@@ -28,6 +28,12 @@ const sourceImage = shallowRef(null); // { data, width, height }
 
 // Page capture: corners (detected, then adjustable), flattened + cleaned page
 const flattenOn = ref(true);
+// Cleaning strength of the page shown and read, in %: 0 evens out the
+// lighting only (reads ~1.5 F1 better on photos), 100 is scan-like (white
+// paper, black ink), up to 200 harsher. `cleaning` follows the slider live,
+// `strength` is applied when it is released.
+const cleaning = ref(100);
+const strength = ref(100);
 const quad = ref(null); // TL, TR, BR, BL in sourceImage pixels
 const detectedQuad = ref(null);
 const captureState = ref(null); // "detecting" | "found" | "not-found" | "error"
@@ -37,9 +43,8 @@ const pageImage = shallowRef(null); // the flattened, cleaned page
 const pageUrl = ref(null);
 let flattenRun = 0;
 
-// Recognition reads the photo, flattened inside the corners when page
-// capture is on (the worker evens out its lighting; the strong "scan" look
-// shown here reads slightly worse)
+// Recognition reads the photo, flattened inside the corners and cleaned like
+// the preview when page capture is on
 const canRun = computed(
 	() =>
 		sourceImage.value !== null &&
@@ -112,7 +117,9 @@ async function refreshPage() {
 	const run = ++flattenRun;
 	flattening.value = true;
 	try {
-		const page = await flattenPage(sourceImage.value, quad.value);
+		const page = await flattenPage(sourceImage.value, quad.value, {
+			strength: strength.value / 100,
+		});
 		if (run === flattenRun) {
 			setPage(page);
 		}
@@ -125,6 +132,11 @@ async function refreshPage() {
 		}
 	}
 }
+
+watch(strength, () => {
+	resetResult();
+	refreshPage();
+});
 
 watch(flattenOn, (on) => {
 	resetResult();
@@ -230,6 +242,7 @@ async function run() {
 	try {
 		const result = await runPipeline(engineId.value, sourceImage.value, {
 			quad: flattenOn.value ? quad.value : null,
+			strength: strength.value / 100,
 			onProgress: (p) => {
 				progress.value = p;
 			},
@@ -308,6 +321,28 @@ async function downloadMidi() {
 					Find the page, flatten it and clean it (for photos; untick for
 					scans)
 				</label>
+				<label v-if="flattenOn" class="slider">
+					<span>Cleaning</span>
+					<input
+						v-model.number="cleaning"
+						type="range"
+						min="0"
+						max="200"
+						step="5"
+						list="cleaning-marks"
+						@change="strength = cleaning"
+					/>
+					<output>{{ cleaning }} %</output>
+					<datalist id="cleaning-marks">
+						<option value="0"></option>
+						<option value="100"></option>
+						<option value="200"></option>
+					</datalist>
+					<span class="hint">
+						0 %: lighting evened out only (can read slightly better) · 100 %:
+						scan-like, white paper and black ink · more: harsher
+					</span>
+				</label>
 				<div v-if="flattenOn" class="capture">
 					<figure>
 						<PageCorners
@@ -333,7 +368,7 @@ async function downloadMidi() {
 					<figure>
 						<img v-if="pageUrl" :src="pageUrl" class="page" :class="{ stale: flattening }" alt="The page, flattened and cleaned" />
 						<div v-else class="page placeholder">{{ captureState === "detecting" ? "" : "Flattening…" }}</div>
-						<figcaption>The page, flattened and cleaned.</figcaption>
+						<figcaption>The page as it will be recognized.</figcaption>
 						<div class="row">
 							<button class="secondary" :disabled="!pageImage || flattening" @click="downloadPage">
 								Download page

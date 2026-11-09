@@ -159,26 +159,47 @@ export function whitePoint(image, estimate, { min = 0.78, max = 0.95 } = {}) {
 	return Math.min(max, Math.max(min, median - 4 * sigma));
 }
 
+// The tone curve at strength 0 (lighting evened out only) and 1 (scan-like:
+// paper white, ink black, colours a little stronger); other strengths
+// interpolate, and above 1 extrapolate, between the two.
+const GENTLE = { white: 0.97, black: 0, gamma: 1, saturation: 1 };
+const SCAN = { black: 0.25, gamma: 1.3, saturation: 1.3 }; // white: measured
+
 /**
- * The cleaned page (RGBA, same size). `white`: the fraction of the local
- * paper brightness from which a pixel is pure white (default: measured on
- * the page, see whitePoint); `black`: the fraction at and under which it is
- * pure black; `gamma` > 1 darkens mid-tones (thin lines, anti-aliased
- * edges); `saturation` scales each pixel's distance from its grey (coloured
- * pencil and highlighter stay readable).
+ * Tone-curve parameters for a cleaning strength (0 … 2), given the page's
+ * measured white point.
  */
-export function enhancePage(
-	image,
-	{ white = null, black = 0.25, gamma = 1.3, saturation = 1.3 } = {},
-) {
+export function toneParams(strength, measuredWhite) {
+	const mix = (a, b) => a + strength * (b - a);
+	const white = Math.max(0.6, mix(GENTLE.white, measuredWhite));
+	return {
+		white,
+		black: Math.max(0, Math.min(white - 0.15, mix(GENTLE.black, SCAN.black))),
+		gamma: Math.max(0.5, mix(GENTLE.gamma, SCAN.gamma)),
+		saturation: Math.max(0, mix(GENTLE.saturation, SCAN.saturation)),
+	};
+}
+
+/**
+ * The cleaned page (RGBA, same size), at a cleaning `strength`: 0 evens out
+ * the lighting only (background division), 1 is scan-like, above 1 is
+ * harsher. Explicit `white` (the fraction of the local paper brightness from
+ * which a pixel is pure white), `black` (at and under which it is pure
+ * black), `gamma` (> 1 darkens mid-tones) or `saturation` (scales each
+ * pixel's distance from its grey) override the strength's values.
+ */
+export function enhancePage(image, { strength = 1, ...overrides } = {}) {
 	const { data, width, height } = image;
 	const estimate = paperEstimate(image);
-	const top = white ?? whitePoint(image, estimate);
+	const { white, black, gamma, saturation } = {
+		...toneParams(strength, overrides.white ?? whitePoint(image, estimate)),
+		...overrides,
+	};
 	// tone curve on the paper ratio v = pixel / paper, tabulated
 	const STEPS = 1024;
 	const curve = new Uint8ClampedArray(STEPS + 1);
 	for (let s = 0; s <= STEPS; s++) {
-		const t = Math.min(1, Math.max(0, (s / STEPS - black) / (top - black)));
+		const t = Math.min(1, Math.max(0, (s / STEPS - black) / (white - black)));
 		curve[s] = Math.round(255 * t ** gamma);
 	}
 	const tone = (value, paper) =>

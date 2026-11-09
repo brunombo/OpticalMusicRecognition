@@ -93,13 +93,18 @@ const plainQuad = (quad) => (quad ? quad.map(([x, y]) => [x, y]) : null);
 
 /**
  * Recognize an image with a detector size ("2m" or "28m"); with `quad`, the
- * page inside it is flattened and its lighting evened out first.
+ * page inside it is flattened and cleaned first at `strength` (0 … 2, see
+ * capture/index.js).
  * @returns {Promise<{ musicXml: string, summary: object, symbols: object[] }>}
  */
-export function runPipeline(size, image, { quad = null, onProgress } = {}) {
+export function runPipeline(
+	size,
+	image,
+	{ quad = null, strength = 0, onProgress } = {},
+) {
 	return call(
 		"recognize",
-		{ size, image: copy(image), quad: plainQuad(quad) },
+		{ size, image: copy(image), quad: plainQuad(quad), strength },
 		{ onProgress },
 	);
 }
@@ -113,6 +118,10 @@ export function detectPageCorners(image, { onProgress } = {}) {
 }
 
 /** The page inside `quad`, flattened and cleaned like a scan. */
-export function flattenPage(image, quad, { tone = "scan" } = {}) {
-	return call("flatten", { image: copy(image), quad: plainQuad(quad), tone });
+export function flattenPage(image, quad, { strength = 1 } = {}) {
+	return call("flatten", {
+		image: copy(image),
+		quad: plainQuad(quad),
+		strength,
+	});
 }
