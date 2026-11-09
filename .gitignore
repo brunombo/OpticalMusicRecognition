@@ -14,3 +14,7 @@ public/models/*.onnx
 # Editor/OS noise
 .DS_Store
 out/
+
+# copisteria checkout used by scripts/models/export_copista.py
+.cache/
+public/models/*.json

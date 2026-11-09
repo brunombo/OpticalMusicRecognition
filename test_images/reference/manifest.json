@@ -1,0 +1,13 @@
+{
+	"piece": "Clementi, Sonatina Op.36 No.2, III. Rondo (Allegro), G major, 3/8",
+	"midi": "WIMA.7fe7-cl362bc.mid",
+	"midiSource": "IMSLP #218430 (WIMA, Reccmo), public domain; movements II+III",
+	"startTick": 20160,
+	"measureQuarters": 1.5,
+	"tracks": [1, 2],
+	"pages": [
+		{ "name": "Rondo-MuzioClementi-0", "measures": [1, 36] },
+		{ "name": "Rondo-MuzioClementi-1", "measures": [37, 74] },
+		{ "name": "Rondo-MuzioClementi-2", "measures": [75, 111] }
+	]
+}

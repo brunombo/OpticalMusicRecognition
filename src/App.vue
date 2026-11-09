@@ -3,15 +3,14 @@ import { computed, onBeforeUnmount, ref, shallowRef } from "vue";
 import { engines, imageFromSource, runPipeline } from "./pipeline/index.js";
 import { musicXmlToMidi, renderMusicXml } from "./render/verovio.js";
 
-const engineId = ref("classical");
+const engineId = ref("2m");
 const previewUrl = ref(null);
 const running = ref(false);
 const progress = ref(null);
 const error = ref(null);
 const musicXml = ref(null);
 const svgPages = ref([]);
-const noteCount = ref(0);
-const staffCount = ref(0);
+const summary = ref(null);
 
 const cameraActive = ref(false);
 const videoEl = ref(null);
@@ -108,9 +107,8 @@ async function run() {
 			},
 		});
 		musicXml.value = result.musicXml;
-		noteCount.value = result.score.notes.length;
-		staffCount.value = result.score.staves.length;
-		if (result.score.notes.length > 0) {
+		summary.value = result.summary;
+		if (result.summary.notes + result.summary.rests > 0) {
 			svgPages.value = await renderMusicXml(result.musicXml);
 		}
 	} catch (e) {
@@ -172,7 +170,8 @@ async function downloadMidi() {
 				</button>
 			</div>
 			<p class="hint">
-				Best results: printed music, flat page, even lighting, ≥300 DPI.
+				Best results: printed music, flat page, even lighting, the whole page
+				in frame. Phone photos work; pencil marks are mostly ignored.
 			</p>
 			<video v-if="cameraActive" ref="videoEl" autoplay playsinline></video>
 			<img v-if="previewUrl && !cameraActive" :src="previewUrl" class="preview" alt="Selected sheet music" />
@@ -200,8 +199,10 @@ async function downloadMidi() {
 		<section v-if="musicXml" class="panel">
 			<h2>3. Result</h2>
 			<p class="hint">
-				{{ staffCount }} staff/staves, {{ noteCount }} notes detected.
-				Treat this as a first draft — recognition is never perfect.
+				{{ summary.staves }} staves in {{ summary.systems }} systems,
+				{{ summary.notes }} notes and {{ summary.rests }} rests read
+				({{ summary.changed }} corrected from context). Treat this as a
+				first draft — recognition is never perfect.
 			</p>
 			<div v-if="svgPages.length > 0" class="score-view">
 				<!-- SVG produced locally by Verovio from our own MusicXML -->
@@ -211,7 +212,7 @@ async function downloadMidi() {
 			<p v-else class="hint">No notes found — nothing to render.</p>
 			<div class="row" style="margin-top: 0.75rem">
 				<button @click="downloadMusicXml">Download MusicXML</button>
-				<button class="secondary" :disabled="noteCount === 0" @click="downloadMidi">
+				<button class="secondary" :disabled="summary.notes === 0" @click="downloadMidi">
 					Download MIDI
 				</button>
 			</div>

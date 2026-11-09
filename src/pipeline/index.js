@@ -1,31 +1,28 @@
-// Pipeline orchestrator: image → engine (in a Web Worker) → score IR →
-// MusicXML. Engines are swappable (classical CV now, oemer ONNX now,
-// homr later). Recognition runs off the main thread so the UI stays
-// responsive during inference.
+// Pipeline API for the UI: image → recognition in a Web Worker → MusicXML.
+// The worker runs copisteria's reader (JavaScript port) with the copista
+// networks in ONNX Runtime Web; two detector sizes are offered.
 
-import { buildMusicXml } from "./musicxml.js";
-import { targetSize } from "./preprocess.js";
-
-// Engine metadata for the UI (kept in sync with worker.js — the worker
-// imports the actual engine modules).
 export const engines = [
-	{
-		id: "classical",
-		name: "Classical CV (fast, no download, clean scores only)",
-	},
-	{ id: "oemer", name: "oemer neural network (accurate, ~110 MB download)" },
+	{ id: "2m", name: "Fast — copista-2m (≈16 MB download)" },
+	{ id: "28m", name: "High accuracy — copista-28m (≈124 MB download)" },
 ];
 
-/**
- * Resize a source canvas/bitmap into the pixel-count window the models
- * expect and return an RGBA image object.
- */
+// Pages are read at their own resolution (the reader picks the detector's
+// input size from the staff space); only very large photos are reduced, to
+// bound memory.
+const MAX_SIDE = 5000;
+
+/** RGBA pixels of a source canvas / bitmap / video frame. */
 export function imageFromSource(source, sourceWidth, sourceHeight) {
-	const { width, height } = targetSize(sourceWidth, sourceHeight);
+	const scale = Math.min(1, MAX_SIDE / Math.max(sourceWidth, sourceHeight));
+	const width = Math.round(sourceWidth * scale);
+	const height = Math.round(sourceHeight * scale);
 	const canvas = document.createElement("canvas");
 	canvas.width = width;
 	canvas.height = height;
 	const ctx = canvas.getContext("2d");
+	ctx.fillStyle = "#fff";
+	ctx.fillRect(0, 0, width, height);
 	ctx.drawImage(source, 0, 0, width, height);
 	const { data } = ctx.getImageData(0, 0, width, height);
 	return { data, width, height };
@@ -45,10 +42,10 @@ function getWorker() {
 }
 
 /**
- * Full run: recognize in the worker + build MusicXML.
- * @returns {Promise<{ score: object, musicXml: string }>}
+ * Recognize an image with a detector size ("2m" or "28m").
+ * @returns {Promise<{ musicXml: string, summary: object, symbols: object[] }>}
  */
-export function runPipeline(engineId, image, { onProgress } = {}) {
+export function runPipeline(size, image, { onProgress } = {}) {
 	const w = getWorker();
 	const id = ++nextRunId;
 	return new Promise((resolve, reject) => {
@@ -64,8 +61,7 @@ export function runPipeline(engineId, image, { onProgress } = {}) {
 				onProgress?.(event.data.progress);
 			} else if (event.data.type === "result") {
 				cleanup();
-				const score = event.data.score;
-				resolve({ score, musicXml: buildMusicXml(score) });
+				resolve(event.data.result);
 			} else if (event.data.type === "error") {
 				cleanup();
 				reject(new Error(event.data.message));
@@ -77,11 +73,10 @@ export function runPipeline(engineId, image, { onProgress } = {}) {
 		};
 		w.addEventListener("message", onMessage);
 		w.addEventListener("error", onError);
-		// Send a copy of the pixels: keeps the caller's image usable for
-		// re-runs (a transfer would detach the buffer).
+		// A copy keeps the caller's image usable for re-runs
 		w.postMessage({
 			id,
-			engineId,
+			size,
 			image: {
 				data: image.data.slice(),
 				width: image.width,

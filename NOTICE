@@ -1,0 +1,16 @@
+MusicOCR
+Copyright 2026 the MusicOCR authors — MIT licence (see README).
+
+This product includes software developed by KobiMusic (https://kobi.music):
+copisteria, https://github.com/kobimusic/copisteria
+
+src/pipeline/copisteria/ is a JavaScript port of copisteria's reader
+(commit c685f280914d91a694494588d9f6a376d7917eba, Copyright 2026 KobiMusic,
+Apache License 2.0 — see LICENSES/copisteria-Apache-2.0.txt). The files were
+changed from the original: translated from Python to JavaScript, the OCR-text
+features left out, and fingerings.js added. The copista model weights
+(kobimusic/copista-2m, kobimusic/copista-28m on Hugging Face, Apache-2.0) are
+converted to ONNX by scripts/models/export_copista.py.
+
+Third-party runtime libraries: ONNX Runtime Web (MIT), Verovio (LGPL-3.0),
+Vue (MIT).

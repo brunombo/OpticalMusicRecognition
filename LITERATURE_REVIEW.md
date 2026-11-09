@@ -1,6 +1,12 @@
 # Optical Music Recognition — Literature Review & Implementation Plan
 
-*Compiled 2026-07-16. Sources were fetched and claim-checked against primary sources (arXiv papers, GitHub repositories, official docs); a few items noted below are unverified.*
+*Compiled 2026-07-16, updated 2026-11-09. Sources were fetched and claim-checked against primary sources (arXiv papers, GitHub repositories, official docs); a few items noted below are unverified.*
+
+> **November 2026 update:** see [§6](#6-update--november-2026) for what changed
+> since July (copisteria, Transcoda, LEGATO 2, homr 0.7) and a measured
+> comparison on this repo's test pages, and [§7](#7-upgrade-plan-november-2026)
+> for the plan that supersedes §5: replace the oemer engine with a JS port of
+> copisteria (Apache-2.0). Sections 1–5 are kept as written in July.
 
 ## 1. Academic state of the art
 
@@ -243,3 +249,186 @@ Runtime Web: MIT. This app: MIT.
 - ONNX Runtime Web WebGPU docs · https://onnxruntime.ai/docs/tutorials/web/ep-webgpu.html
 - https://github.com/rism-digital/verovio · https://github.com/opensheetmusicdisplay/opensheetmusicdisplay
 - QuickStave (existence proof, closed source) · https://www.quickstave.com/optical-music-recognition
+
+## 6. Update — November 2026
+
+### 6.1 What changed since July
+
+| Date | Work | What it is | Why it matters here |
+|------|------|------------|---------------------|
+| Oct 2026 | **copisteria / copista** (KobiMusic) | Detector (270 classes + note attributes: staff position, stem, dots, voice) → geometry-only front end → **2M-param "evidence" transformer** reading each system with its neighbours → rhythm/accidental decoding → MusicXML with beams, ties, tuplets, keys, meters | **Apache-2.0 code and weights**, small (copista-2m ≈ 4M params, copista-28m ≈ 31M). Self-reported OMR-NED on real scans: quartets 8.6 %, Lieder 16.9 %, Polish piano 31.5 % — ahead of homr, Transcoda, Legato and Audiveris on every set it reports. 30 commits, 18★: young project. |
+| Jun 2026 | **homr 0.7.0** | oemer-derived segmentation + per-staff TrOMR transformer; **now runs on onnxruntime, no PyTorch** | Browser port is now technically easy — but code *and* weights are **AGPL-3.0** (weights also inherit CC BY-NC data via PrIMuS). Own benchmark: SMB 12.8 % OMR-NED. No beams in output. |
+| May 2026 | **Transcoda** (Dratschuk & Swoboda, arXiv 2605.10835, NeurIPS 2026) | 59M-param end-to-end img2seq trained only on synthetic data ("zero-shot" on real scans) | OMR-NED 64 % on the Polish scans vs 80 % SMT++, 87 % Legato — data-centric synthesis helps, but page-level end-to-end models remain far behind pipelines on real scans. Release promised on publication. |
+| Jul 2026 | **LEGATO 2** (Yang et al., arXiv 2607.05769) | System-by-system autoregressive VLM; also transcribes embedded text | Not released. LEGATO 1 (ICLR 2026, Llama-3.2-11B-Vision, MIT, gated HF weights) is far too big for a browser. |
+| Jan 2026 | **SMT++** published in IJCV | Full-page pianoform img2seq (unchanged model) | Still collapses on real scans in third-party benchmarks (78 % OMR-NED on polish-scores in homr's benchmark). |
+| Apr 2026 | Ma et al., arXiv 2604.16446 | CNN (bottleneck residual + dilations) + BiGRU + CTC | 0.45 % symbol error on Camera-PrIMuS — monophonic incipits only; no code. |
+| May / Sep 2026 | MusiCorpus (arXiv 2605.18436); full-page handwritten monophonic OMR (arXiv 2609.05662) | 1,309 hand-annotated historical/handwritten pages with MusicXML; synthetic-pretraining study | Handwritten remains out of scope for this app. |
+| 2026 | Audiveris 5.10–5.11 | Classical/hybrid Java pipeline | A vendor benchmark (Sheetly, Oct 2026, unverified) shows it dropping from 88 % to 50 % accuracy on simulated phone photos. |
+
+**Benchmarks and metrics.** The field has converged on **OMR-NED** (edit
+distance over normalized musical symbols / (N_ref + N_pred)) on **real** pages:
+SMB (685 pages), polish-scores (112 historical piano scans, kern + MusicXML),
+OpenScore Lieder/Quartets scans, and homr's *sheet-music-photos* (public-domain
+editions + phone photos). Absolute numbers still depend on the tokenizer
+(homr's native parser vs musicdiff), so only same-harness comparisons count.
+
+**Take-aways.**
+1. The decisive 2026 shift is not bigger end-to-end models but **detector +
+   learned context model** pipelines (copisteria): the network sees symbols,
+   and a small transformer over all symbols of neighbouring systems fixes what
+   local reading cannot (a natural that contradicts the key, a bar that does
+   not add up, a dot that the repetitions have).
+2. Page-level image-to-sequence models (SMT++, Transcoda, LEGATO) are still
+   much worse on real scans and too big for a browser.
+3. Licensing now separates the two best open tools: copisteria is
+   Apache-2.0, homr is AGPL-3.0.
+
+### 6.2 Measured on this repo's test pages
+
+`test_images/` holds three phone photos (≈ 590 × 792 px, so a staff space is
+only ≈ 4.5 px) of Clementi Op. 36 No. 2, III (Henry Lemoine edition, pages
+54–56), with printed and pencilled fingerings, coloured annotations and page
+curvature. Reference: the public-domain WIMA MIDI (IMSLP #218430), 111 bars of
+3/8. Scored with `scripts/eval/score.mjs` (pitch tokens, and pitch +
+inter-onset-interval tokens, per hand; LCS alignment so a missed bar costs only
+its notes; NED = edit distance / (N_ref + N_pred) on pitch + rhythm tokens):
+
+| Engine | Pitch F1 | Pitch + rhythm F1 | NED | CPU time / page |
+|--------|---------:|------------------:|----:|-----------------|
+| This app, July version (oemer UNets + JS rules) | 36.7 | 1.3 | 74.1 | page 1: no staff found |
+| homr 0.7 (AGPL — excluded) | 97.3 | **96.5** | **3.0** | ~18 s |
+| copisteria + copista-2m | 97.6 | 84.0 | 8.7 | ~6 s (Python) |
+| copisteria + copista-28m | **99.1** | 91.0 | 5.0 | ~17 s (Python) |
+
+*Correction:* a first version of this table showed homr at 67.7 / 66.2; that
+was a bug in the harness (the two staves of homr's page-1 part were taken in
+the wrong order), fixed since. homr reads these pages very well — its
+per-staff transformer reads rhythm straight from the image — but code and
+weights are AGPL-3.0 and the app stays permissive (decision of 2026-11-09).
+
+copisteria's errors concentrate where fingerings are dense: the copista
+detector has no fingering class, so printed and pencilled fingering digits
+come out as **tuplet numbers** (50–76 per page), and the evidence model then
+reads runs of 16ths as sextuplets. A few extra left-hand notes come from
+noteheads a player drew in blue pen.
+
+**ONNX feasibility (verified).** Both detectors (two graphs each: a fully
+convolutional trunk, and a verifier over the top-K peak cells with RoIAlign)
+and the evidence model export to ONNX (opset 17) with max abs logit error
+≤ 2e-4 and identical argmax, at dynamic image sizes and token counts:
+copista-2m 6.7 + 1.1 MB, copista-28m 106 + 8.8 MB, evidence model 8.2 MB.
+
+## 7. Upgrade plan (November 2026)
+
+**Decisions (2026-11-09):** permissive licences only (app stays MIT) ·
+port copisteria's reader to **JavaScript** (no Pyodide) · ship copista-2m by
+default with copista-28m as an on-demand "high accuracy" option · **remove**
+the oemer and classical engines.
+
+### 7.1 Architecture
+
+```mermaid
+flowchart LR
+    A[Image] --> B[Grayscale + Lanczos resize<br/>staff space → 10.6 px]
+    B --> C[Detector trunk ONNX<br/>features, objectness, boxes]
+    C --> D[JS: 3×3 peaks, top-K]
+    D --> E[Detector verifier ONNX<br/>class, refine, attributes]
+    E --> F[JS: decode + class-wise NMS<br/>→ detections]
+    F --> G[JS front end<br/>staves, systems, bars, assignment]
+    G --> H[JS tokens per system window]
+    H --> I[Evidence model ONNX<br/>2M transformer]
+    I --> J[JS writer: meter, rhythm Viterbi,<br/>accidentals, voices → MusicXML]
+    J --> K[Verovio: SVG + MIDI]
+```
+
+### 7.2 Work items
+
+| # | Item | Done when |
+|---|------|-----------|
+| 1 | **Evaluation harness** — `scripts/eval/` (MIDI reader, MusicXML timing, LCS/NED scorer) + reference manifest | Baselines reproducible with one command |
+| 2 | **ONNX export script** (Python, run once by maintainers) + model fetch script + NOTICE/attribution | `npm run fetch:models` gets ~16 MB (2m) |
+| 3 | **Detector in JS** — Lanczos resize, staff-space estimation, two-pass sizing, peak/top-K, verifier, NMS, records | JS detections match Python's on the test pages |
+| 4 | **Front end in JS** — page cleaning, staff finder, systems/links model, bars, assignment, revision pass | Same staves/systems/bars as Python |
+| 5 | **Tokens + reader in JS** — `features.page_arrays`, windowing, evidence model I/O, readings | Same readings as Python |
+| 6 | **Writer in JS** — parts, pitch/alteration, meter decode, rhythm Viterbi, beams/slurs/ties, MusicXML | Same MusicXML as Python (or same score) |
+| 7 | **App integration** — worker engine, model download/caching, 2m/28m option, remove oemer/classical | Browser run on the 3 test pages |
+| 8 | **Improve beyond upstream** on the hard cases found (e.g. fingering digits read as tuplets) — only with changes that generalize | Test-page scores improve without page-specific rules |
+
+### 7.3 Acceptance
+
+On the three test pages, with copista-2m in the browser pipeline: pitch F1
+≥ 95 and pitch + rhythm F1 ≥ 80 on every page, matching the Python reference
+within noise. Rules are never tuned to a single page: every heuristic must
+name the general notation fact it relies on, and unit tests use synthetic
+cases.
+
+### 7.4 Risks
+
+- **Port size** (~4.4k lines of Python, dense heuristics): mitigated by
+  module-by-module parity tests against dumped Python intermediates.
+- **Upstream drift**: pin the copisteria commit in the export script and the
+  NOTICE; port upstream fixes deliberately.
+- **Young upstream** (released Oct 2026): our own harness and tests guard
+  against regressions in what we ship.
+- **Speed in WASM**: copista-2m trunk ≈ 0.4 s native → a few seconds in
+  WASM; 28m will be slow without WebGPU — hence 2m by default.
+
+### 7.5 Status (2026-11-09)
+
+Items 1–8 are done:
+
+- **Port** (`src/pipeline/copisteria/`, ~3.5k lines of JS): with
+  `upstream: true` its MusicXML is **byte-identical** to copisteria's Python
+  on the three test pages, a 2252 × 4000 phone photo (box path) and a clean
+  render (ink path). Exact parity needed Pillow's 8-bit Lanczos and luma,
+  numpy's percentile / median, Python's banker's rounding, scipy's
+  even-size filter origins and ElementTree's serialization. The verifier's
+  `nn.TransformerEncoder` had to be re-expressed with dynamic reshapes for
+  ONNX (the stock trace bakes in the candidate count).
+- **App**: one engine (copista-2m default, 28m optional) in a Web Worker on
+  ONNX Runtime Web; models cached with the Cache API. Verified in headless
+  Chrome: a test page takes ~4 s end to end (WASM, models cached). The old
+  oemer / classical engines are removed.
+- **Beyond upstream — fingering digits** (`fingerings.js`): a digit centred
+  over a notehead is a fingering when another digit sits over a neighbouring
+  note or over another note of its beam group, or when its note is the first /
+  last of a beam group of ≥ 3 (tuplet numbers are one per group, centred on
+  it). On the test pages:
+
+  | | Pitch F1 | Pitch + rhythm F1 (pages 0 / 1 / 2) |
+  |---|---:|---:|
+  | copista-2m, upstream | 97.6 | 84.0 (90.5 / 69.7 / 91.8) |
+  | **copista-2m + fingering filter** | **97.9** | **94.7** (95.1 / 90.2 / 98.8) |
+  | copista-28m + fingering filter | 99.0 | 93.0 (96.6 / 87.1 / 95.3) |
+
+  Over-fitting checks: the filter changes nothing on the two pages outside
+  the test set (the Boogie photo, the clean render), and keeps every real
+  tuplet number on a synthetic page of beamed / bracketed triplets and
+  sextuplets with fingered 16th runs (at full and test-photo resolution).
+  One side effect seen there: the evidence model treats tuplet numbers as
+  page-wide evidence for tuplets, so removing a (correctly judged) stray
+  fingering can make it read fewer tuplets elsewhere on a page of real
+  tuplets.
+- Tried and **not** kept: whitening saturated (coloured-ink) pixels — no
+  net gain (94.7 → 94.4); the blue pen is too dark to separate from print by
+  colour and overlaps printed heads.
+
+**Open ends:** lone fingerings over the middle note of a 3-note group are
+indistinguishable from triplet numbers by layout alone (the meter's
+arithmetic would have to decide); retraining the detector with a fingering
+class would remove the confusion at its source; homr shows that a per-staff
+image-to-sequence reader recovers rhythm better on these photos (96.5) — a
+permissively licensed model of that kind would be worth adding as a second
+engine.
+
+## Sources (November 2026 update)
+
+- copisteria · https://github.com/kobimusic/copisteria · weights https://huggingface.co/kobimusic/copista-2m, https://huggingface.co/kobimusic/copista-28m (Apache-2.0)
+- homr 0.7.0 · https://github.com/liebharc/homr · Benchmark.md, LICENSE_FAQ.md · https://pypi.org/project/homr
+- Transcoda · arXiv:2605.10835 · https://huggingface.co/datasets/btrkeks/polish-scores
+- LEGATO · arXiv:2506.19065 (ICLR 2026) · LEGATO 2 · arXiv:2607.05769
+- SMT++ (IJCV 2026) · arXiv:2405.12105
+- Ma et al. · arXiv:2604.16446 — MusiCorpus · arXiv:2605.18436 — handwritten full-page · arXiv:2609.05662
+- Sheet Music Benchmark · arXiv:2506.10488 · https://huggingface.co/datasets/PRAIG/SMB
+- Sheetly OMR benchmark (vendor, unverified) · https://www.trysheetly.com/compare/omr-benchmark
+- Reference MIDI: IMSLP #218430 (WIMA, public domain) · https://imslp.org/wiki/6_Sonatinas,_Op.36_(Clementi,_Muzio)
