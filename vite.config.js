@@ -3,6 +3,8 @@ import vue from "@vitejs/plugin-vue";
 import { defineConfig } from "vite";
 
 export default defineConfig(({ command }) => ({
+	// The site's path: "/" locally, "/<repo>/" on GitHub Pages (set by CI)
+	base: process.env.BASE_PATH ?? "/",
 	plugins: [vue()],
 	resolve: {
 		// Verovio imports node:module only when running under Node; the

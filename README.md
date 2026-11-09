@@ -65,6 +65,22 @@ Enable the pre-commit hook (biome + fast tests):
 git config core.hooksPath .githooks
 ```
 
+## Deployment (GitHub Pages)
+
+`.github/workflows/pages.yml` builds and deploys on every push to `main`. The
+models are not committed: the workflow exports them
+(`npm run fetch:models`, cached on the export script's hash, so it only reruns
+when the pinned copisteria commit changes) and ships them in the site's
+`models/` folder. One-time setup: *Settings → Pages → Source: GitHub Actions*.
+
+- `BASE_PATH` (set by the workflow to `/<repo>/`) is the site's path.
+- `VITE_MODELS_URL` (optional, at build time) loads the models from another
+  host instead, e.g. if Pages refuses the 106 MB `copista-28m-trunk.onnx`.
+- Pages cannot send COOP/COEP headers; `public/coi-serviceworker.js` adds them
+  (one automatic reload on the first visit) so ONNX Runtime can use threads.
+- Browsers keep the models in the Cache API under a name derived from
+  `copista-meta.json`: a deploy with re-exported models replaces them.
+
 ## Evaluation
 
 `test_images/` holds three phone photos of Clementi's Sonatina Op. 36 No. 2,

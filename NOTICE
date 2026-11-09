@@ -13,4 +13,5 @@ features left out, and fingerings.js added. The copista model weights
 converted to ONNX by scripts/models/export_copista.py.
 
 Third-party runtime libraries: ONNX Runtime Web (MIT), Verovio (LGPL-3.0),
-Vue (MIT).
+Vue (MIT), coi-serviceworker 0.1.7 (MIT, Guido Zuidhof and contributors —
+public/coi-serviceworker.js, LICENSES/coi-serviceworker-MIT.txt).

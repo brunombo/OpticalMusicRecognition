@@ -13,11 +13,20 @@ import { rgbaToGray } from "./copisteria/image.js";
 import { recognizedSymbols, recognizePage } from "./copisteria/index.js";
 import { createModels, META_FILE, modelFiles } from "./copisteria/runtime.js";
 
-const MODELS_URL = `${import.meta.env?.BASE_URL ?? "/"}models/`;
-const CACHE_NAME = "musicocr-models-v1";
+// Where the models are served: VITE_MODELS_URL when set at build time (another
+// host), else the site's own models/ folder.
+const MODELS_URL = (() => {
+	const url =
+		import.meta.env?.VITE_MODELS_URL ||
+		`${import.meta.env?.BASE_URL ?? "/"}models/`;
+	return url.endsWith("/") ? url : `${url}/`;
+})();
+const CACHE_PREFIX = "musicocr-models-";
+const META_CACHE = "musicocr-meta";
 
 let ort = null;
 let metaPromise = null;
+let modelCache = null; // the cache of the current model version
 const sessions = {};
 let webgpuUsable = null;
 
@@ -29,12 +38,42 @@ async function loadOrt() {
 	return ort;
 }
 
-/** Fetch a model file through the Cache API, reporting download progress. */
+const hasCaches = () => typeof caches !== "undefined";
+
+/** A response's body, reporting progress (works whether or not it was compressed). */
+async function readBody(response, onProgress) {
+	const total = Number(response.headers.get("content-length")) || 0;
+	if (!response.body) {
+		return new Uint8Array(await response.arrayBuffer());
+	}
+	const chunks = [];
+	let received = 0;
+	const reader = response.body.getReader();
+	while (true) {
+		const { done, value } = await reader.read();
+		if (done) {
+			break;
+		}
+		chunks.push(value);
+		received += value.length;
+		// a compressed response's length is the compressed size: cap the ratio
+		if (total) {
+			onProgress?.(Math.min(1, received / total));
+		}
+	}
+	const bytes = new Uint8Array(received);
+	let at = 0;
+	for (const chunk of chunks) {
+		bytes.set(chunk, at);
+		at += chunk.length;
+	}
+	return bytes;
+}
+
+/** Fetch a model file through the model cache, reporting download progress. */
 async function fetchCached(file, onProgress) {
 	const url = MODELS_URL + file;
-	const cache =
-		typeof caches !== "undefined" ? await caches.open(CACHE_NAME) : null;
-	let response = cache ? await cache.match(url) : undefined;
+	let response = modelCache ? await modelCache.match(url) : undefined;
 	if (!response) {
 		response = await fetch(url);
 		if (!response.ok) {
@@ -42,27 +81,20 @@ async function fetchCached(file, onProgress) {
 				`Model download failed (${response.status}): ${url} — run \`npm run fetch:models\``,
 			);
 		}
-		if (cache) {
-			await cache.put(url, response.clone());
+		if (modelCache) {
+			await modelCache.put(url, response.clone());
 		}
 	}
-	const total = Number(response.headers.get("content-length")) || 0;
-	if (!response.body || total === 0) {
-		return new Uint8Array(await response.arrayBuffer());
+	return readBody(response, onProgress);
+}
+
+/** A short hash of a string (FNV-1a), for naming the model cache. */
+function hash(text) {
+	let h = 0x811c9dc5;
+	for (let i = 0; i < text.length; i++) {
+		h = Math.imul(h ^ text.charCodeAt(i), 0x01000193);
 	}
-	const bytes = new Uint8Array(total);
-	const reader = response.body.getReader();
-	let received = 0;
-	while (true) {
-		const { done, value } = await reader.read();
-		if (done) {
-			break;
-		}
-		bytes.set(value, received);
-		received += value.length;
-		onProgress?.(received / total);
-	}
-	return bytes;
+	return (h >>> 0).toString(16);
 }
 
 function withTimeout(promise, ms, label) {
@@ -112,10 +144,46 @@ async function createSession(bytes, gpu) {
 	return rt.InferenceSession.create(bytes, { executionProviders: ["wasm"] });
 }
 
+/**
+ * The model metadata, network first (the cached copy only when offline). The
+ * model cache is named after it, so a deploy with re-exported models never
+ * serves stale files; caches of other versions are deleted.
+ */
 async function loadMeta() {
-	metaPromise ??= fetchCached(META_FILE).then((b) =>
-		JSON.parse(new TextDecoder().decode(b)),
-	);
+	metaPromise ??= (async () => {
+		const url = MODELS_URL + META_FILE;
+		const metaCache = hasCaches() ? await caches.open(META_CACHE) : null;
+		let text;
+		try {
+			const response = await fetch(url, { cache: "no-cache" });
+			if (!response.ok) {
+				throw new Error(`${response.status}`);
+			}
+			text = await response.text();
+			await metaCache?.put(url, new Response(text));
+		} catch (error) {
+			const cached = await metaCache?.match(url);
+			if (!cached) {
+				throw new Error(
+					`Model metadata unavailable (${error.message}): ${url} — run \`npm run fetch:models\``,
+				);
+			}
+			text = await cached.text();
+		}
+		if (hasCaches()) {
+			const name = CACHE_PREFIX + hash(text);
+			for (const old of await caches.keys()) {
+				if (old.startsWith(CACHE_PREFIX) && old !== name) {
+					await caches.delete(old);
+				}
+			}
+			modelCache = await caches.open(name);
+		}
+		return JSON.parse(text);
+	})().catch((error) => {
+		metaPromise = null; // let a later run try again
+		throw error;
+	});
 	return metaPromise;
 }
 

@@ -4,6 +4,9 @@
 		<meta charset="UTF-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
 		<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+		<!-- GitHub Pages cannot send COOP/COEP headers: this service worker adds
+		     them (multithreaded WASM). It does nothing where the server sends them. -->
+		<script src="/coi-serviceworker.js"></script>
 		<title>MusicOCR — client-side sheet music recognition</title>
 	</head>
 	<body>
