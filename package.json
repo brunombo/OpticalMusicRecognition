@@ -14,7 +14,8 @@
 		"lint": "biome check .",
 		"lint:fix": "biome check --write .",
 		"e2e": "node scripts/e2e-test.mjs --score test_images/reference/manifest.json test_images/Rondo-MuzioClementi-0.png test_images/Rondo-MuzioClementi-1.png test_images/Rondo-MuzioClementi-2.png",
-		"eval": "node scripts/eval/score.mjs test_images/reference/manifest.json"
+		"eval": "node scripts/eval/score.mjs test_images/reference/manifest.json",
+		"upload:models": "uv run scripts/models/upload_hf.py"
 	},
 	"dependencies": {
 		"onnxruntime-web": "^1.22.0",

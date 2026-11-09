@@ -1,6 +1,7 @@
 /*! coi-serviceworker v0.1.7 - Guido Zuidhof and contributors, licensed under MIT */
-// Modified for MusicOCR: requests for the ONNX models (…/models/…) are not
-// intercepted. They are same-origin (no header needed under COEP), and a
+// Modified for MusicOCR: model files (*.onnx, copista-meta.json, anything
+// under /models/) and cross-origin requests (the models on Hugging Face are
+// CORS fetches, allowed under COEP as they are) are not intercepted: a
 // 100 MB download streamed through the worker is aborted when the browser
 // stops the worker mid-way (Firefox: NS_BINDING_ABORTED).
 let coepCredentialless = false;
@@ -30,7 +31,12 @@ if (typeof window === 'undefined') {
         if (r.cache === "only-if-cached" && r.mode !== "same-origin") {
             return;
         }
-        if (new URL(r.url).pathname.includes("/models/")) {
+        const url = new URL(r.url);
+        if (
+            url.origin !== self.location.origin ||
+            url.pathname.includes("/models/") ||
+            /\.onnx$|copista-meta\.json$/.test(url.pathname)
+        ) {
             return; // MusicOCR: let the network serve model files directly
         }
 
