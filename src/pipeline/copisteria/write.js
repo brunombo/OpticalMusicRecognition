@@ -1692,6 +1692,7 @@ function note(meas, e, dur, voice, staffNo, wholeRest = false) {
 			nn.sub("fermata");
 		}
 	}
+	return ne;
 }
 
 function lcm(a, b) {
@@ -1707,8 +1708,14 @@ const cmpDirs = (a, b) =>
 	cmpTuple([a[0], a[1], String(a[2])], [b[0], b[1], String(b[2])]);
 
 /** The page's MusicXML (score-partwise 4.0) from a reading. */
-export function write(rd, { title = null } = {}) {
+/**
+ * The reading as a MusicXML string. With `noteIds` (this app's addition),
+ * each note and rest read from the page carries `id="sym-<symbol index>"`
+ * (unique; repeated copies carry none), to find its symbol again.
+ */
+export function write(rd, { title = null, noteIds = false } = {}) {
 	const L = rd.layout;
+	const usedIds = new Set();
 	const plans = planParts(rd);
 	const place = alignSystems(rd, plans);
 	const root = new El("score-partwise", { version: "4.0" });
@@ -2142,7 +2149,7 @@ export function write(rd, { title = null } = {}) {
 									multi ? staffNo : null,
 								);
 							}
-							note(
+							const ne = note(
 								meas,
 								e,
 								units(dur),
@@ -2150,6 +2157,10 @@ export function write(rd, { title = null } = {}) {
 								multi ? staffNo : null,
 								!meterShown,
 							);
+							if (noteIds && !e.copied && e.si >= 0 && !usedIds.has(e.si)) {
+								usedIds.add(e.si);
+								ne.set("id", `sym-${e.si}`);
+							}
 							for (const [kind, payload, below] of e.post) {
 								direction(
 									meas,

@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onBeforeUnmount, ref, shallowRef, watch } from "vue";
 import PageCorners from "./components/PageCorners.vue";
+import PageHighlight from "./components/PageHighlight.vue";
 import { fullQuad } from "./pipeline/capture/index.js";
 import {
 	detectPageCorners,
@@ -20,6 +21,13 @@ const error = ref(null);
 const musicXml = ref(null);
 const svgPages = ref([]);
 const summary = ref(null);
+// The recognized notes and rests by id (the score's SVG carries the same
+// ids): hovering one on the score shows it on the page.
+const symbolBoxes = shallowRef(new Map());
+const hovered = shallowRef(null); // the score's element under the pointer
+const hoveredBox = computed(() =>
+	hovered.value ? (symbolBoxes.value.get(hovered.value.id) ?? null) : null,
+);
 
 const cameraActive = ref(false);
 const videoEl = ref(null);
@@ -71,6 +79,8 @@ function resetResult() {
 	error.value = null;
 	musicXml.value = null;
 	svgPages.value = [];
+	symbolBoxes.value = new Map();
+	hover(null);
 }
 
 /** A new photo: show it, then look for the page's corners. */
@@ -269,6 +279,7 @@ async function run() {
 		}
 		musicXml.value = result.musicXml;
 		summary.value = result.summary;
+		symbolBoxes.value = new Map(result.symbols.map((s) => [s.id, s.box]));
 		svgPages.value = svg;
 	} catch (e) {
 		if (run === recognitionRun) {
@@ -290,6 +301,45 @@ function download(name, blob) {
 	a.download = name;
 	a.click();
 	URL.revokeObjectURL(url);
+}
+
+/** Mark a note or rest of the score (or none) as hovered. */
+function hover(element) {
+	hovered.value?.classList.remove("hovered");
+	hovered.value = element;
+	element?.classList.add("hovered");
+}
+
+/**
+ * The pointer moved over the score (or tapped it): the nearest note or rest
+ * within a few pixels (Verovio's glyphs are thin, hit-testing them misses).
+ * The last one stays marked when the pointer leaves.
+ */
+function onScorePointer(event) {
+	const { clientX: x, clientY: y, currentTarget } = event;
+	let best = null;
+	let bestDistance = 8; // px
+	for (const element of currentTarget.querySelectorAll("g.note, g.rest")) {
+		if (!symbolBoxes.value.has(element.id)) {
+			continue;
+		}
+		const r = element.getBoundingClientRect();
+		const dx = Math.max(r.left - x, 0, x - r.right);
+		const dy = Math.max(r.top - y, 0, y - r.bottom);
+		// inside several (a chord's notes share a stem): the closest centre
+		const centre = Math.hypot(
+			x - (r.left + r.right) / 2,
+			y - (r.top + r.bottom) / 2,
+		);
+		const distance = Math.hypot(dx, dy) + 0.01 * centre;
+		if (distance < bestDistance) {
+			best = element;
+			bestDistance = distance;
+		}
+	}
+	if (best && best !== hovered.value) {
+		hover(best);
+	}
 }
 
 function downloadMusicXml() {
@@ -446,10 +496,24 @@ async function downloadMidi() {
 				({{ summary.changed }} corrected from context). Treat this as a
 				first draft — recognition is never perfect.
 			</p>
-			<div v-if="svgPages.length > 0" class="score-view">
-				<!-- SVG produced locally by Verovio from our own MusicXML -->
-				<!-- eslint-disable-next-line vue/no-v-html -->
-				<div v-for="(svg, i) in svgPages" :key="i" v-html="svg"></div>
+			<div v-if="svgPages.length > 0" class="result-view">
+				<div
+					class="score-view"
+					@pointermove="onScorePointer"
+					@pointerdown="onScorePointer"
+				>
+					<!-- SVG produced locally by Verovio from our own MusicXML -->
+					<!-- eslint-disable-next-line vue/no-v-html -->
+					<div v-for="(svg, i) in svgPages" :key="i" v-html="svg"></div>
+				</div>
+				<PageHighlight
+					v-if="pageUrl && pageImage"
+					class="source-page"
+					:src="pageUrl"
+					:width="pageImage.width"
+					:height="pageImage.height"
+					:box="hoveredBox"
+				/>
 			</div>
 			<p v-else class="hint">No notes found — nothing to render.</p>
 			<div class="row" style="margin-top: 0.75rem">

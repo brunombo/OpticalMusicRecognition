@@ -195,6 +195,44 @@ input[type="file"] {
 	height: auto;
 }
 
+/* score | the page as recognized (kept in view while the score scrolls) */
+.result-view {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) minmax(220px, 34%);
+	gap: 1rem;
+	align-items: start;
+}
+
+.source-page {
+	position: sticky;
+	top: 0.5rem;
+}
+
+@media (max-width: 640px) {
+	.result-view {
+		grid-template-columns: minmax(0, 1fr);
+	}
+
+	/* above the score, pinned: the magnified view only */
+	.source-page {
+		order: -1;
+		z-index: 1;
+		background: var(--panel);
+		padding-bottom: 0.5rem;
+	}
+
+	.source-page .whole {
+		display: none;
+	}
+}
+
+/* the note or rest hovered on the score, also marked on the page */
+.score-view g.hovered {
+	color: #e65028;
+	fill: #e65028;
+	stroke: #e65028;
+}
+
 .error {
 	color: #b3372f;
 	margin-top: 0.5rem;

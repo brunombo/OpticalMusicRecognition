@@ -297,6 +297,7 @@ export async function recognize(size, image, { onProgress } = {}) {
 		models,
 		meta,
 		{
+			noteIds: true, // to link the score's notes to the page
 			onProgress: (p) =>
 				onProgress?.({ stage: p.stage, ratio: 0.2 + p.ratio * 0.8 }),
 		},
