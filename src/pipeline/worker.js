@@ -2,10 +2,10 @@
 // stays responsive. One message in ({ id, task, ... }), progress and result
 // messages out. ONNX sessions stay cached across runs.
 //   task "detect":     { image }            → corners (TL, TR, BR, BL) or null
-//   task "flatten":    { image, quad, strength } → the flattened, cleaned page
-//   task "recognize":  { size, image, quad?, strength? } → { musicXml, summary, symbols }
+//   task "flatten":    { image, quad, strength, lighting } → the flattened, cleaned page
+//   task "recognize":  { size, image, quad?, strength?, lighting? } → { musicXml, summary, symbols }
 //                      (with a quad, the page inside it is flattened and
-//                      cleaned first at that strength, see
+//                      cleaned first with those settings, see
 //                      capture/index.js)
 
 import { flattenAndClean } from "./capture/index.js";
@@ -31,11 +31,13 @@ async function run(message, onProgress) {
 		case "flatten":
 			return flattenAndClean(message.image, message.quad, {
 				strength: message.strength,
+				lighting: message.lighting,
 			});
 		case "recognize": {
 			const page = message.quad
 				? flattenAndClean(message.image, message.quad, {
 						strength: message.strength ?? 0,
+						lighting: message.lighting ?? 1,
 					})
 				: message.image;
 			return recognize(message.size, page, { onProgress });

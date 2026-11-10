@@ -28,11 +28,14 @@ let cameraStream = null;
 const sourceImage = shallowRef(null); // { data, width, height }
 
 // Page capture: corners (detected, then adjustable), flattened + cleaned page
-const flattenOn = ref(true);
-// Cleaning strength of the page shown and read, in %: 0 evens out the
-// lighting only (reads ~1.5 F1 better on photos), 100 is scan-like (white
-// paper, black ink), up to 200 harsher. `cleaning` follows the slider live,
-// `strength` is applied when it is released.
+// For a scan, "Whole photo" keeps the full image.
+// Lighting evened out, in %: 0 leaves the lighting as photographed, 100
+// removes shadows and gradients. Cleaning strength, in %: 0 leaves the tones
+// unchanged, 100 is scan-like (white paper,
+// black ink), up to 200 harsher. `evening` and `cleaning` follow the sliders
+// live; `lighting` and `strength` are applied when they are released.
+const evening = ref(100);
+const lighting = ref(100);
 const cleaning = ref(100);
 const strength = ref(100);
 const quad = ref(null); // TL, TR, BR, BL in sourceImage pixels
@@ -45,12 +48,10 @@ const pageUrl = ref(null);
 let flattenRun = 0;
 
 // Recognition reads the photo, flattened inside the corners and cleaned like
-// the preview when page capture is on. It never blocks the controls: Stop
+// the preview. It never blocks the controls: Stop
 // cancels it, Recognize restarts it, and changing its input stops it.
 const canRun = computed(
-	() =>
-		sourceImage.value !== null &&
-		!(flattenOn.value && captureState.value === "detecting"),
+	() => sourceImage.value !== null && captureState.value !== "detecting",
 );
 let recognitionRun = 0;
 
@@ -125,7 +126,7 @@ function setPage(page) {
 
 /** Flatten and clean the page inside the current corners (latest call wins). */
 async function refreshPage() {
-	if (!sourceImage.value || !quad.value || !flattenOn.value) {
+	if (!sourceImage.value || !quad.value) {
 		return;
 	}
 	const run = ++flattenRun;
@@ -133,6 +134,7 @@ async function refreshPage() {
 	try {
 		const page = await flattenPage(sourceImage.value, quad.value, {
 			strength: strength.value / 100,
+			lighting: lighting.value / 100,
 		});
 		if (run === flattenRun) {
 			setPage(page);
@@ -147,16 +149,9 @@ async function refreshPage() {
 	}
 }
 
-watch(strength, () => {
+watch([strength, lighting], () => {
 	resetResult();
 	refreshPage();
-});
-
-watch(flattenOn, (on) => {
-	resetResult();
-	if (on && !pageImage.value) {
-		refreshPage();
-	}
 });
 
 function onCornersCommit() {
@@ -256,8 +251,9 @@ async function run() {
 	progress.value = { stage: "starting", ratio: 0 };
 	try {
 		const result = await runPipeline(engineId.value, sourceImage.value, {
-			quad: flattenOn.value ? quad.value : null,
+			quad: quad.value,
 			strength: strength.value / 100,
+			lighting: lighting.value / 100,
 			onProgress: (p) => {
 				if (run === recognitionRun) {
 					progress.value = p;
@@ -342,12 +338,29 @@ async function downloadMidi() {
 			</p>
 			<video v-if="cameraActive" ref="videoEl" autoplay playsinline></video>
 			<template v-if="previewUrl && sourceImage && !cameraActive">
-				<label class="check">
-					<input v-model="flattenOn" type="checkbox" />
-					Find the page, flatten it and clean it (for photos; untick for
-					scans)
+				<label class="slider">
+					<span>Lighting</span>
+					<input
+						v-model.number="evening"
+						type="range"
+						min="0"
+						max="100"
+						step="5"
+						list="lighting-marks"
+						@change="lighting = evening"
+					/>
+					<output>{{ evening }} %</output>
+					<datalist id="lighting-marks">
+						<option value="0"></option>
+						<option value="50"></option>
+						<option value="100"></option>
+					</datalist>
+					<span class="hint">
+						How much the lighting is evened out · 0 %: as photographed ·
+						100 %: shadows and gradients removed
+					</span>
 				</label>
-				<label v-if="flattenOn" class="slider">
+				<label class="slider">
 					<span>Cleaning</span>
 					<input
 						v-model.number="cleaning"
@@ -365,11 +378,11 @@ async function downloadMidi() {
 						<option value="200"></option>
 					</datalist>
 					<span class="hint">
-						0 %: lighting evened out only (can read slightly better) · 100 %:
-						scan-like, white paper and black ink · more: harsher
+						0 %: tones unchanged · 100 %: scan-like, white paper and black
+						ink · more: harsher
 					</span>
 				</label>
-				<div v-if="flattenOn" class="capture">
+				<div class="capture">
 					<figure>
 						<PageCorners
 							v-model="quad"
@@ -402,7 +415,6 @@ async function downloadMidi() {
 						</div>
 					</figure>
 				</div>
-				<img v-else :src="previewUrl" class="preview" alt="Selected sheet music" />
 			</template>
 		</section>
 

@@ -16,12 +16,17 @@ export function fullQuad(width, height) {
 }
 
 /**
- * Flatten the page inside `quad`, then clean it at `strength` (0: lighting
- * evened out only, 1: scan-like, up to 2: harsher; null: not cleaned). On the
- * Rondo photos, recognition read ~1.5 F1 better at 0 than at 1.
+ * Flatten the page inside `quad`, then clean it: `lighting` (0 … 1) evens out
+ * the lighting, `strength` sets the tone curve (0: unchanged, 1: scan-like, up
+ * to 2: harsher; null: not cleaned at all). On the Rondo photos, recognition
+ * read ~1.5 F1 better with a gentle curve than at 1.
  */
-export function flattenAndClean(image, quad, { strength = 1 } = {}) {
+export function flattenAndClean(
+	image,
+	quad,
+	{ strength = 1, lighting = 1 } = {},
+) {
 	const size = flatSize(quad, image.width, image.height);
 	const flat = warpQuad(image, quad, size.width, size.height);
-	return strength === null ? flat : enhancePage(flat, { strength });
+	return strength === null ? flat : enhancePage(flat, { strength, lighting });
 }

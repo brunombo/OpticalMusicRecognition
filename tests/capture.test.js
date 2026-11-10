@@ -148,19 +148,20 @@ describe("page cleaning", () => {
 		expect(at(170, 40)).toBeLessThan(40); // ink in the light
 	});
 
-	it("maps the cleaning strength from gentle (0) to scan-like (1) and beyond", () => {
-		expect(toneParams(0, 0.9)).toEqual({
-			white: 0.97,
+	it("maps the cleaning strength from none (0) to scan-like (1) and beyond", () => {
+		// paper at 80 % of 255: 255 is at 1.25 × the paper, so v ↦ v is kept
+		expect(toneParams(0, 0.9, 0.8)).toEqual({
+			white: 1.25,
 			black: 0,
 			gamma: 1,
 			saturation: 1,
 		});
-		const scan = toneParams(1, 0.9);
+		const scan = toneParams(1, 0.9, 0.8);
 		expect(scan.white).toBeCloseTo(0.9);
 		expect(scan.black).toBeCloseTo(0.25);
 		expect(scan.gamma).toBeCloseTo(1.3);
 		// harsher above 1, and the curve never collapses
-		const harsh = toneParams(2, 0.9);
+		const harsh = toneParams(2, 0.9, 0.8);
 		expect(harsh.white).toBeLessThan(scan.white);
 		expect(harsh.black).toBeGreaterThan(scan.black);
 		expect(harsh.white - harsh.black).toBeGreaterThanOrEqual(0.15 - 1e-9);
@@ -175,6 +176,43 @@ describe("page cleaning", () => {
 			enhancePage(image, { strength }).data[4 * (30 * 60 + 30)];
 		expect(line(0)).toBeGreaterThan(line(1));
 		expect(line(1)).toBeGreaterThan(line(2));
+	});
+
+	it("evens out the lighting in proportion to the lighting setting", () => {
+		// paper from 110 (shadow) to 170, no ink
+		const width = 200;
+		const height = 100;
+		const image = solidImage(width, height, [0, 0, 0]);
+		for (let y = 0; y < height; y++) {
+			for (let x = 0; x < width; x++) {
+				const v = 110 + (60 * x) / width;
+				image.data.set([v, v, v], 4 * (y * width + x));
+			}
+		}
+		const spread = (lighting) => {
+			const out = enhancePage(image, { strength: 0, lighting });
+			return out.data[4 * (50 * width + 190)] - out.data[4 * (50 * width + 10)];
+		};
+		expect(spread(1)).toBeLessThanOrEqual(2); // flat
+		expect(spread(0)).toBeGreaterThan(40); // as photographed
+		expect(spread(0.5)).toBeGreaterThan(spread(1));
+		expect(spread(0.5)).toBeLessThan(spread(0));
+	});
+
+	it("leaves the page unchanged at cleaning 0 and lighting 0", () => {
+		const image = solidImage(90, 70, [0, 0, 0]);
+		for (let i = 0; i < image.data.length; i += 4) {
+			const k = i / 4;
+			image.data.set([(k * 7) % 256, (k * 13) % 256, (k * 29) % 256], i);
+		}
+		const out = enhancePage(image, { strength: 0, lighting: 0 });
+		expect(Array.from(out.data)).toEqual(Array.from(image.data));
+	});
+
+	it("keeps the paper's colour at cleaning 0 with the lighting evened out", () => {
+		const image = solidImage(80, 80, [200, 190, 160]);
+		const out = enhancePage(image, { strength: 0, lighting: 1 });
+		expect(Array.from(out.data.slice(0, 4))).toEqual([200, 190, 160, 255]);
 	});
 
 	it("leaves a clean scan clean", () => {

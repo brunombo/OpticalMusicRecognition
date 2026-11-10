@@ -630,10 +630,13 @@ ratio, clamped to 0.78…0.95) so thin, blurred staff lines survive.
 | Clean scans through capture (should be a no-op) | 96.8 / 93.3 (clean scans directly: 97.9 / 94.7) |
 
 The recognizer is already robust to lighting, so the scan-like look is a
-choice: a "Cleaning" slider from 0 % (division only) through 100 %
-(scan-like, the default) to 200 % (harsher) interpolates the tone curve, and
-the page shown is always the page read.
-Capture is on by default with a checkbox to switch it off for scans. Open: a check that
+choice, with two sliders: "Lighting" (0 % as photographed, 100 % the default,
+full background division; in between, the local paper estimate is blended
+geometrically with one page-wide level) and "Cleaning" from 0 % (tones
+unchanged: with Lighting at 0 % too, the page is exactly the flattened photo)
+through 100 % (scan-like, the default) to 200 % (harsher). The "gentle" rows
+above used the earlier 0 % curve (paper just under white). The page shown is always the page read.
+Capture is always on; for a scan, "Whole photo" keeps the full image. Open: a check that
 the outline does not cut through staff lines (would catch Rondo-0), and page
 curl (§8.3 step 7).
 

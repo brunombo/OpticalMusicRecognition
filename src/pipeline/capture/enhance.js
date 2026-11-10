@@ -1,7 +1,7 @@
 // Clean a flattened page photo into a scan-like page (LITERATURE_REVIEW.md
 // §8.3): uneven lighting and shadows are removed by dividing each colour
 // channel by an estimate of the paper under it (background division, as in
-// Bako et al. ACCV 2016), then levels map paper to white and ink to near
+// Bako et al. ACCV 2016), then a tone curve maps paper to white and ink to near
 // black. Each channel gets the same tone curve, so coloured ink and
 // highlighting keep their hue.
 //
@@ -97,6 +97,28 @@ export function paperEstimate({ data, width, height }, { work = WORK } = {}) {
 	};
 }
 
+/**
+ * The paper estimate with its lighting evened out at `lighting` (0 … 1): 1
+ * keeps the local estimate (shadows and gradients removed), 0 replaces it by
+ * one page-wide level per channel (the lighting is left as photographed),
+ * values between blend the two geometrically. `levels` are the page-wide
+ * levels (the median paper brightness per channel).
+ */
+export function evenLighting({ maps, gw, gh }, lighting) {
+	const l = Math.min(1, Math.max(0, lighting));
+	const levels = maps.map(
+		(m) => Float32Array.from(m).sort()[Math.floor(m.length / 2)],
+	);
+	return {
+		maps: maps.map((m, c) =>
+			m.map((v) => levels[c] ** (1 - l) * Math.max(1, v) ** l),
+		),
+		levels,
+		gw,
+		gh,
+	};
+}
+
 /** Bilinear upscale of the paper estimate for one image row (per channel). */
 function paperRow({ maps, gw, gh }, width, height, y, row) {
 	const gy = Math.min(gh - 1, Math.max(0, ((y + 0.5) * gh) / height - 0.5));
@@ -159,60 +181,86 @@ export function whitePoint(image, estimate, { min = 0.78, max = 0.95 } = {}) {
 	return Math.min(max, Math.max(min, median - 4 * sigma));
 }
 
-// The tone curve at strength 0 (lighting evened out only) and 1 (scan-like:
-// paper white, ink black, colours a little stronger); other strengths
-// interpolate, and above 1 extrapolate, between the two.
-const GENTLE = { white: 0.97, black: 0, gamma: 1, saturation: 1 };
+// The tone curve at strength 0 (none: each pixel keeps its value) and 1
+// (scan-like: paper white, ink black, colours a little stronger); strengths
+// in between interpolate. Above 1 it gets harsher by SCAN − SOFT per unit.
+const NONE = { black: 0, gamma: 1, saturation: 1 }; // white: 255 (see below)
 const SCAN = { black: 0.25, gamma: 1.3, saturation: 1.3 }; // white: measured
+const SOFT = { white: 0.97, black: 0, gamma: 1, saturation: 1 };
 
 /**
  * Tone-curve parameters for a cleaning strength (0 … 2), given the page's
- * measured white point.
+ * measured white point; `white` and `black` are fractions of the paper
+ * brightness. `paper` (0 … 1) is the paper's page-wide level: 255 is at
+ * 1 / paper of it, so at strength 0 the curve is the identity.
  */
-export function toneParams(strength, measuredWhite) {
-	const mix = (a, b) => a + strength * (b - a);
-	const white = Math.max(0.6, mix(GENTLE.white, measuredWhite));
+export function toneParams(strength, measuredWhite, paper = 1) {
+	const none = { ...NONE, white: 1 / Math.max(1 / 255, paper) };
+	const scan = { ...SCAN, white: measuredWhite };
+	const at = (key) =>
+		strength <= 1
+			? none[key] + strength * (scan[key] - none[key])
+			: scan[key] + (strength - 1) * (scan[key] - SOFT[key]);
+	const white = Math.max(0.6, at("white"));
 	return {
 		white,
-		black: Math.max(0, Math.min(white - 0.15, mix(GENTLE.black, SCAN.black))),
-		gamma: Math.max(0.5, mix(GENTLE.gamma, SCAN.gamma)),
-		saturation: Math.max(0, mix(GENTLE.saturation, SCAN.saturation)),
+		black: Math.max(0, Math.min(white - 0.15, at("black"))),
+		gamma: Math.max(0.5, at("gamma")),
+		saturation: Math.max(0, at("saturation")),
 	};
 }
 
 /**
- * The cleaned page (RGBA, same size), at a cleaning `strength`: 0 evens out
- * the lighting only (background division), 1 is scan-like, above 1 is
- * harsher. Explicit `white` (the fraction of the local paper brightness from
+ * The cleaned page (RGBA, same size). `lighting` (0 … 1) is how much the
+ * lighting is evened out (background division, towards the page-wide paper
+ * colour; 0: not at all). The cleaning `strength` sets the tone curve: 0
+ * leaves the values alone, 1 is scan-like, above 1 is harsher. With both at
+ * 0, the page is returned unchanged. Explicit `white` (the fraction of the local paper brightness from
  * which a pixel is pure white), `black` (at and under which it is pure
  * black), `gamma` (> 1 darkens mid-tones) or `saturation` (scales each
  * pixel's distance from its grey) override the strength's values.
  */
-export function enhancePage(image, { strength = 1, ...overrides } = {}) {
+export function enhancePage(
+	image,
+	{ strength = 1, lighting = 1, ...overrides } = {},
+) {
 	const { data, width, height } = image;
-	const estimate = paperEstimate(image);
-	const { white, black, gamma, saturation } = {
-		...toneParams(strength, overrides.white ?? whitePoint(image, estimate)),
+	const estimate = evenLighting(paperEstimate(image), lighting);
+	const measured =
+		overrides.white ?? (strength === 0 ? 1 : whitePoint(image, estimate));
+	// one tone curve per channel (the paper's level differs), on the paper
+	// ratio v = pixel / paper, tabulated over 0 … white
+	const params = estimate.levels.map((level) => ({
+		...toneParams(strength, measured, level / 255),
 		...overrides,
-	};
-	// tone curve on the paper ratio v = pixel / paper, tabulated
-	const STEPS = 1024;
-	const curve = new Uint8ClampedArray(STEPS + 1);
-	for (let s = 0; s <= STEPS; s++) {
-		const t = Math.min(1, Math.max(0, (s / STEPS - black) / (white - black)));
-		curve[s] = Math.round(255 * t ** gamma);
-	}
-	const tone = (value, paper) =>
-		curve[Math.min(STEPS, Math.round((value / Math.max(1, paper)) * STEPS))];
+	}));
+	const { saturation } = params[0];
+	const STEPS = 1020; // a multiple of 255: the identity curve is exact
+	const curves = params.map(({ white, black, gamma }) => {
+		const curve = new Uint8ClampedArray(STEPS + 1);
+		for (let s = 0; s <= STEPS; s++) {
+			const v = (s / STEPS) * white;
+			const t = Math.min(1, Math.max(0, (v - black) / (white - black)));
+			curve[s] = Math.round(255 * t ** gamma);
+		}
+		return curve;
+	});
+	const tone = (c, value, paper) =>
+		curves[c][
+			Math.min(
+				STEPS,
+				Math.round((value / Math.max(1, paper) / params[c].white) * STEPS),
+			)
+		];
 	const out = new Uint8ClampedArray(data.length);
 	const row = [0, 1, 2].map(() => new Float32Array(width));
 	for (let y = 0; y < height; y++) {
 		paperRow(estimate, width, height, y, row);
 		for (let x = 0; x < width; x++) {
 			const i = 4 * (y * width + x);
-			const r = tone(data[i], row[0][x]);
-			const g = tone(data[i + 1], row[1][x]);
-			const b = tone(data[i + 2], row[2][x]);
+			const r = tone(0, data[i], row[0][x]);
+			const g = tone(1, data[i + 1], row[1][x]);
+			const b = tone(2, data[i + 2], row[2][x]);
 			const grey = 0.299 * r + 0.587 * g + 0.114 * b;
 			out[i] = grey + saturation * (r - grey);
 			out[i + 1] = grey + saturation * (g - grey);
