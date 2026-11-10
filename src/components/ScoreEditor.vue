@@ -14,6 +14,7 @@ import {
 	shallowRef,
 	watch,
 } from "vue";
+import { download } from "../download.js";
 import { editRecognition } from "../pipeline/index.js";
 import { addedDet, boxKey, VALUES } from "../pipeline/place.js";
 import { musicXmlToMidi, renderMusicXml } from "../render/verovio.js";
@@ -26,6 +27,7 @@ const props = defineProps({
 	pageUrl: { type: String, default: null },
 	pageWidth: { type: Number, required: true },
 	pageHeight: { type: Number, required: true },
+	active: { type: Boolean, default: true }, // shown (keys act on it)
 });
 
 const result = shallowRef(props.initial);
@@ -254,6 +256,9 @@ watch(
 const VALUE_KEYS = { 1: 0, 2: 1, 3: 2, 4: 3, 5: 4, 6: 5 }; // → VALUES
 
 function onKey(event) {
+	if (!props.active) {
+		return;
+	}
 	const t = event.target;
 	if (t instanceof HTMLElement && t.closest("input, select, textarea")) {
 		return;
@@ -351,15 +356,6 @@ const ALTER_CHOICES = [
 
 // ---------------------------------------------------------------- downloads
 
-function download(name, blob) {
-	const url = URL.createObjectURL(blob);
-	const a = document.createElement("a");
-	a.href = url;
-	a.download = name;
-	a.click();
-	URL.revokeObjectURL(url);
-}
-
 function downloadMusicXml() {
 	download(
 		"score.musicxml",
@@ -377,32 +373,29 @@ async function downloadMidi() {
 
 <template>
 	<div class="score-editor">
-		<p class="hint">
-			{{ result.summary.staves }} staves in {{ result.summary.systems }}
-			systems, {{ result.summary.notes }} notes and
-			{{ result.summary.rests }} rests read ({{ result.summary.changed }}
-			corrected from context<template v-if="result.summary.edited">,
-			{{ result.summary.edited }} edited by hand</template>). Treat this as a
-			first draft: click a note to correct it.
-		</p>
-		<div class="row edit-bar">
-			<button class="secondary" :disabled="!ops.length" title="Undo (Ctrl+Z)" @click="undo">
-				Undo
-			</button>
-			<button class="secondary" :disabled="!undone.length" title="Redo (Ctrl+Shift+Z)" @click="redo">
-				Redo
-			</button>
+		<div class="toolbar">
+			<span class="summary" :title="`${result.summary.staves} staves in ${result.summary.systems} systems; ${result.summary.changed} corrected from context`">
+				{{ result.summary.notes }} notes, {{ result.summary.rests }} rests<template v-if="result.summary.edited"> · {{ result.summary.edited }} edited</template>
+			</span>
+			<div class="group">
+				<button class="secondary" :disabled="!ops.length" title="Undo (Ctrl+Z)" @click="undo">↶ Undo</button>
+				<button class="secondary" :disabled="!undone.length" title="Redo (Ctrl+Shift+Z)" @click="redo">↷ Redo</button>
+				<button class="secondary" :disabled="!ops.length" title="Undo all edits" @click="resetEdits">Undo all</button>
+			</div>
 			<button
 				class="secondary"
 				:aria-pressed="adding"
 				:disabled="!pageUrl"
 				@click="adding = !adding"
 			>
-				{{ adding ? "Stop adding" : "Add missed notes" }}
+				{{ adding ? "Stop adding" : "+ Add missed notes" }}
 			</button>
-			<button class="secondary" :disabled="!ops.length" @click="resetEdits">
-				Undo all edits
-			</button>
+			<div class="group downloads">
+				<button title="Download MusicXML" @click="downloadMusicXml">⬇ MusicXML</button>
+				<button class="secondary" :disabled="result.summary.notes === 0" title="Download MIDI" @click="downloadMidi">⬇ MIDI</button>
+			</div>
+		</div>
+		<p class="status-line">
 			<span v-if="editing" class="status">
 				{{ editProgress?.stage === "reading in context" ? "Reading the page again…" : "Updating…" }}
 			</span>
@@ -411,7 +404,8 @@ async function downloadMidi() {
 				{{ unplaced }} added symbol{{ unplaced > 1 ? "s" : "" }} could not be
 				placed in a bar.
 			</span>
-		</div>
+			<span v-else class="hint">A first draft: click a note to correct it.</span>
+		</p>
 		<AddSymbols
 			v-if="adding && pageUrl"
 			v-model:cls="addCls"
@@ -494,29 +488,53 @@ async function downloadMidi() {
 			</div>
 		</div>
 		<p v-else class="hint">No notes found — nothing to render.</p>
-		<div class="row" style="margin-top: 0.75rem">
-			<button @click="downloadMusicXml">Download MusicXML</button>
-			<button class="secondary" :disabled="result.summary.notes === 0" @click="downloadMidi">
-				Download MIDI
-			</button>
-		</div>
 	</div>
 </template>
 
 <style scoped>
-.edit-bar {
+.toolbar {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.5rem 0.75rem;
 	align-items: center;
-	margin-bottom: 0.75rem;
 }
 
-.edit-bar .status {
+.toolbar .summary {
+	font-weight: 600;
+	margin-right: auto;
+}
+
+.toolbar .group {
+	display: flex;
+	gap: 0.3rem;
+}
+
+.toolbar button {
+	padding: 0.4rem 0.75rem;
+	font-size: 0.9rem;
+}
+
+.toolbar button[aria-pressed="true"] {
+	background: var(--accent);
+	color: var(--accent-ink);
+}
+
+.status-line {
+	margin: 0.4rem 0 0.75rem;
+	font-size: 0.85rem;
+	min-height: 1.2em;
+}
+
+.status-line .status {
 	color: var(--muted);
-	font-size: 0.85rem;
 }
 
-.edit-bar .error {
+.status-line .error {
 	margin: 0;
-	font-size: 0.85rem;
+}
+
+.status-line .hint {
+	font-size: inherit;
 }
 
 .score-view.busy {

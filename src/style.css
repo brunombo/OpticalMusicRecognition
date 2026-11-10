@@ -32,7 +32,7 @@ body {
 }
 
 .app {
-	max-width: 960px;
+	max-width: 1280px;
 	margin: 0 auto;
 	padding: 1.5rem 1rem 4rem;
 }
@@ -90,6 +90,7 @@ button.secondary {
 }
 
 select {
+	max-width: 100%;
 	background: var(--panel);
 	color: var(--ink);
 	border: 1px solid var(--border);
@@ -121,26 +122,20 @@ input[type="file"] {
 	font-variant-numeric: tabular-nums;
 }
 
-/* photo with corners | flattened page: side by side when there is room */
-.capture {
-	display: grid;
-	grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-	gap: 1rem;
-	align-items: start;
-}
-
-.capture figure {
+.photo-corners,
+.page-preview {
 	margin: 0;
 	min-width: 0;
 }
 
-.capture figcaption {
+.photo-corners figcaption,
+.page-preview figcaption {
 	color: var(--muted);
 	font-size: 0.85rem;
 	margin: 0.4rem 0 0.6rem;
 }
 
-.capture .page {
+.page-preview .page {
 	display: block;
 	max-width: 100%;
 	max-height: 70vh;
@@ -151,11 +146,11 @@ input[type="file"] {
 	transition: opacity 0.2s;
 }
 
-.capture .page.stale {
+.page-preview .page.stale {
 	opacity: 0.5;
 }
 
-.capture .placeholder {
+.page-preview .placeholder {
 	aspect-ratio: 0.71;
 	width: 100%;
 	display: grid;
