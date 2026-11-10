@@ -7,14 +7,16 @@
 // Lighting evened out, in %: 0 leaves the lighting as photographed, 100
 // removes shadows and gradients. Cleaning strength, in %: 0 leaves the tones
 // unchanged, 100 is scan-like (white paper, black ink), up to 200 harsher.
-// Both apply to every page. `evening` and `cleaning` follow the sliders live;
-// `lighting` and `strength` are applied when released.
+// Both apply to every page, or, with `perPage`, each page has its own
+// (starting from the shared ones). `evening` and `cleaning` follow the
+// sliders live; `lighting` and `strength` are applied when released (see
+// applySettings).
 //
 // Recognition reads the pages, flattened inside their corners and cleaned
 // like the previews, and joins them into one score. It never blocks the
 // controls: Stop cancels it, Recognize restarts it, and changing its input
 // stops it.
-import { computed, inject, markRaw, reactive, ref, watch } from "vue";
+import { computed, inject, markRaw, reactive, ref } from "vue";
 import { download } from "./download.js";
 import { fullQuad } from "./pipeline/capture/index.js";
 import {
@@ -44,6 +46,7 @@ export function useOmr() {
 	const lighting = ref(100);
 	const cleaning = ref(100);
 	const strength = ref(100);
+	const perPage = ref(false); // each page its own lighting and cleaning
 
 	/**
 	 * The pages, in score order: { id, image (RGBA, raw), previewUrl, quad
@@ -95,6 +98,11 @@ export function useOmr() {
 				image: markRaw(image),
 				previewUrl: url,
 				quad: fullQuad(image.width, image.height),
+				// its own lighting and cleaning (used with perPage), as shared
+				evening: lighting.value,
+				lighting: lighting.value,
+				cleaning: strength.value,
+				strength: strength.value,
 				detectedQuad: null,
 				captureState: "detecting",
 				captureError: null,
@@ -191,15 +199,22 @@ export function useOmr() {
 		}
 	}
 
+	/** The lighting and cleaning a page is prepared with (0 … 1, 0 … 2). */
+	const settingsOf = (p) => {
+		const from = perPage.value ? p : { lighting, strength };
+		const value = (x) => (perPage.value ? x : x.value);
+		return {
+			lighting: value(from.lighting) / 100,
+			strength: value(from.strength) / 100,
+		};
+	};
+
 	/** Flatten and clean a page inside its corners (latest call wins). */
 	async function refreshPage(p) {
 		const run = ++p.flattenRun;
 		p.flattening = true;
 		try {
-			const flat = await flattenPage(p.image, p.quad, {
-				strength: strength.value / 100,
-				lighting: lighting.value / 100,
-			});
+			const flat = await flattenPage(p.image, p.quad, settingsOf(p));
 			if (run === p.flattenRun) {
 				setPageImage(p, flat);
 			}
@@ -213,14 +228,58 @@ export function useOmr() {
 		}
 	}
 
-	watch([strength, lighting], async () => {
-		resetResult();
-		for (const p of pages.value) {
+	/** Refresh pages, one at a time (those still detecting come later). */
+	async function refreshPages(list) {
+		for (const p of list) {
 			if (p.captureState !== "detecting") {
 				await refreshPage(p);
 			}
 		}
-	});
+	}
+
+	/**
+	 * A slider was released: apply the settings it shows (to the current
+	 * page with perPage, else to every page).
+	 */
+	function applySettings() {
+		const target = perPage.value ? page.value : null;
+		const from = target ?? { evening: evening.value, cleaning: cleaning.value };
+		const to = target ?? { lighting: lighting.value, strength: strength.value };
+		if (to.lighting === from.evening && to.strength === from.cleaning) {
+			return;
+		}
+		if (target) {
+			target.lighting = from.evening;
+			target.strength = from.cleaning;
+		} else {
+			lighting.value = from.evening;
+			strength.value = from.cleaning;
+		}
+		resetResult();
+		refreshPages(target ? [target] : pages.value);
+	}
+
+	/**
+	 * Tick: each page starts from the shared settings. Untick: every page
+	 * goes back to them (those that differed are prepared again).
+	 */
+	function setPerPage(on) {
+		if (on === perPage.value) {
+			return;
+		}
+		const differ = (p) =>
+			p.lighting !== lighting.value || p.strength !== strength.value;
+		const changed = on ? [] : pages.value.filter(differ);
+		for (const p of pages.value) {
+			p.evening = p.lighting = lighting.value;
+			p.cleaning = p.strength = strength.value;
+		}
+		perPage.value = on;
+		if (changed.length) {
+			resetResult();
+			refreshPages(changed);
+		}
+	}
 
 	function onCornersCommit() {
 		resetResult();
@@ -265,8 +324,7 @@ export function useOmr() {
 					page: k,
 					count: n,
 					quad: p.quad,
-					strength: strength.value / 100,
-					lighting: lighting.value / 100,
+					...settingsOf(p),
 					onProgress: (q) => {
 						if (run === recognitionRun) {
 							progress.value = {
@@ -311,6 +369,9 @@ export function useOmr() {
 		lighting,
 		cleaning,
 		strength,
+		perPage,
+		setPerPage,
+		applySettings,
 		pages,
 		currentIndex,
 		page,
