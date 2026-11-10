@@ -29,28 +29,41 @@ export function imageFromSource(source, sourceWidth, sourceHeight) {
 	return { data, width, height };
 }
 
-// One long-lived worker: ONNX sessions stay cached across runs.
-let worker = null;
+// Two long-lived workers, so recognition can be stopped (by terminating its
+// worker) without losing page capture, and the corners stay editable while
+// a page is being read. ONNX sessions stay cached in each across runs.
+const workers = { capture: null, recognize: null };
+const pending = { capture: new Set(), recognize: new Set() };
 let nextRunId = 0;
 
-function getWorker() {
-	if (!worker) {
-		worker = new Worker(new URL("./worker.js", import.meta.url), {
-			type: "module",
-		});
-	}
-	return worker;
+function getWorker(kind) {
+	workers[kind] ??= new Worker(new URL("./worker.js", import.meta.url), {
+		type: "module",
+	});
+	return workers[kind];
 }
 
-/** Run a task in the worker (see worker.js); the image is copied, not moved. */
-function call(task, payload, { onProgress } = {}) {
-	const w = getWorker();
+/** Terminate a worker, rejecting its runs with `error`. */
+function stopWorker(kind, error) {
+	workers[kind]?.terminate();
+	workers[kind] = null;
+	for (const fail of [...pending[kind]]) {
+		fail(error);
+	}
+}
+
+/** Run a task in a worker (see worker.js); the image is copied, not moved. */
+function call(kind, task, payload, { onProgress } = {}) {
+	const w = getWorker(kind);
 	const id = ++nextRunId;
 	return new Promise((resolve, reject) => {
-		const cleanup = () => {
+		const settle = (fn, value) => {
 			w.removeEventListener("message", onMessage);
 			w.removeEventListener("error", onError);
+			pending[kind].delete(fail);
+			fn(value);
 		};
+		const fail = (error) => settle(reject, error);
 		const onMessage = (event) => {
 			if (event.data.id !== id) {
 				return;
@@ -58,28 +71,39 @@ function call(task, payload, { onProgress } = {}) {
 			if (event.data.type === "progress") {
 				onProgress?.(event.data.progress);
 			} else if (event.data.type === "result") {
-				cleanup();
-				resolve(event.data.result);
+				settle(resolve, event.data.result);
 			} else if (event.data.type === "error") {
-				cleanup();
-				reject(new Error(event.data.message));
+				fail(new Error(event.data.message));
 			}
 		};
 		const onError = (event) => {
-			cleanup();
-			// an empty message usually means the worker died (out of memory)
-			reject(
+			// an empty message usually means the worker died (out of memory);
+			// a crashed worker is not reused
+			stopWorker(
+				kind,
 				new Error(
 					event.message ||
 						"The recognition worker crashed (likely out of memory — try the fast model or a smaller photo)",
 				),
 			);
-			worker = null; // a crashed worker is not reused
 		};
+		pending[kind].add(fail);
 		w.addEventListener("message", onMessage);
 		w.addEventListener("error", onError);
 		w.postMessage({ id, task, ...payload });
 	});
+}
+
+/**
+ * Stop the recognition in progress, at once: its promise rejects with an
+ * AbortError. The next run starts a fresh worker (models come from the
+ * browser cache, so only their initialization is repeated).
+ */
+export function stopRecognition() {
+	stopWorker(
+		"recognize",
+		new DOMException("Recognition stopped", "AbortError"),
+	);
 }
 
 // A copy keeps the caller's image usable for later runs
@@ -104,6 +128,7 @@ export function runPipeline(
 ) {
 	return call(
 		"recognize",
+		"recognize",
 		{ size, image: copy(image), quad: plainQuad(quad), strength },
 		{ onProgress },
 	);
@@ -114,12 +139,12 @@ export function runPipeline(
  * no page is found.
  */
 export function detectPageCorners(image, { onProgress } = {}) {
-	return call("detect", { image: copy(image) }, { onProgress });
+	return call("capture", "detect", { image: copy(image) }, { onProgress });
 }
 
 /** The page inside `quad`, flattened and cleaned like a scan. */
 export function flattenPage(image, quad, { strength = 1 } = {}) {
-	return call("flatten", {
+	return call("capture", "flatten", {
 		image: copy(image),
 		quad: plainQuad(quad),
 		strength,

@@ -8,6 +8,7 @@ import {
 	flattenPage,
 	imageFromSource,
 	runPipeline,
+	stopRecognition,
 } from "./pipeline/index.js";
 import { musicXmlToMidi, renderMusicXml } from "./render/verovio.js";
 
@@ -44,15 +45,28 @@ const pageUrl = ref(null);
 let flattenRun = 0;
 
 // Recognition reads the photo, flattened inside the corners and cleaned like
-// the preview when page capture is on
+// the preview when page capture is on. It never blocks the controls: Stop
+// cancels it, Recognize restarts it, and changing its input stops it.
 const canRun = computed(
 	() =>
 		sourceImage.value !== null &&
-		!running.value &&
 		!(flattenOn.value && captureState.value === "detecting"),
 );
+let recognitionRun = 0;
 
+/** Stop the recognition in progress, if any. */
+function stop() {
+	if (running.value) {
+		recognitionRun++; // its outcome is ignored
+		stopRecognition();
+		running.value = false;
+		progress.value = null;
+	}
+}
+
+/** The input changed: the result (or the run in progress) is stale. */
 function resetResult() {
+	stop();
 	error.value = null;
 	musicXml.value = null;
 	svgPages.value = [];
@@ -236,28 +250,40 @@ async function run() {
 	if (!sourceImage.value) {
 		return;
 	}
-	running.value = true;
 	resetResult();
+	const run = ++recognitionRun;
+	running.value = true;
 	progress.value = { stage: "starting", ratio: 0 };
 	try {
 		const result = await runPipeline(engineId.value, sourceImage.value, {
 			quad: flattenOn.value ? quad.value : null,
 			strength: strength.value / 100,
 			onProgress: (p) => {
-				progress.value = p;
+				if (run === recognitionRun) {
+					progress.value = p;
+				}
 			},
 		});
+		const svg =
+			result.summary.notes + result.summary.rests > 0
+				? await renderMusicXml(result.musicXml)
+				: [];
+		if (run !== recognitionRun) {
+			return; // stopped or restarted meanwhile
+		}
 		musicXml.value = result.musicXml;
 		summary.value = result.summary;
-		if (result.summary.notes + result.summary.rests > 0) {
-			svgPages.value = await renderMusicXml(result.musicXml);
-		}
+		svgPages.value = svg;
 	} catch (e) {
-		console.error(e);
-		error.value = e.message;
+		if (run === recognitionRun) {
+			console.error(e);
+			error.value = e.message;
+		}
 	} finally {
-		running.value = false;
-		progress.value = null;
+		if (run === recognitionRun) {
+			running.value = false;
+			progress.value = null;
+		}
 	}
 }
 
@@ -389,8 +415,9 @@ async function downloadMidi() {
 					</option>
 				</select>
 				<button :disabled="!canRun" @click="run">
-					{{ running ? "Working…" : "Recognize" }}
+					{{ running ? "Restart" : "Recognize" }}
 				</button>
+				<button v-if="running" class="secondary" @click="stop">Stop</button>
 			</div>
 			<div v-if="progress" class="progress">
 				<div :style="{ width: `${Math.round(progress.ratio * 100)}%` }"></div>
