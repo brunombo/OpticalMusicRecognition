@@ -3,23 +3,29 @@
 // messages out. ONNX sessions stay cached across runs.
 //   task "detect":     { image }            → corners (TL, TR, BR, BL) or null
 //   task "flatten":    { image, quad, strength, lighting } → the flattened, cleaned page
-//   task "recognize":  { size, image, quad?, strength?, lighting? } → { musicXml, summary, symbols }
-//                      (with a quad, the page inside it is flattened and
-//                      cleaned first with those settings, see
+//   task "recognize":  { size, image, page, count, quad?, strength?, lighting? }
+//                      → page `page` (of `count`) read: { summary, symbols,
+//                      staves, musicXml } (with a quad, the page inside it is
+//                      flattened and cleaned first with those settings, see
 //                      capture/index.js)
-//   task "edit":       { ops } → the last recognition with hand edits applied
+//   task "edit":       { page, ops } → that page with hand edits applied
 //                      (see edit.js), same shape
+// `musicXml` is always the whole score: the pages read so far, joined (see
+// join.js).
 
 import { flattenAndClean } from "./capture/index.js";
+import { xmlDocument } from "./copisteria/write.js";
 import {
 	describeError,
 	detectPage,
 	editRecognition,
 	recognize,
 } from "./engine.js";
+import { joinTrees } from "./join.js";
 
 let current = null; // the run in progress, for errors raised outside it
-let recognized = null; // the last recognition's state, for edits
+// the pages of the last recognition: { state (for edits), tree (to join) }
+let pages = [];
 let edits = Promise.resolve(); // edits run one at a time, in order
 
 const fail = (id, error) => {
@@ -32,6 +38,13 @@ self.addEventListener("unhandledrejection", (event) => {
 	event.preventDefault();
 	fail(current, event.reason);
 });
+
+/** Keep a page's reading; its result, with the whole score's MusicXML. */
+function withScore(index, state, { tree, musicXml: _, ...result }) {
+	pages[index] = { state, tree };
+	const trees = pages.filter(Boolean).map((p) => p.tree);
+	return { ...result, musicXml: xmlDocument(joinTrees(trees)) };
+}
 
 async function run(message, onProgress) {
 	switch (message.task) {
@@ -49,19 +62,26 @@ async function run(message, onProgress) {
 						lighting: message.lighting ?? 1,
 					})
 				: message.image;
-			recognized = null;
+			if (message.page === 0) {
+				pages = new Array(message.count).fill(null);
+			}
+			pages[message.page] = null;
 			const { state, ...result } = await recognize(message.size, page, {
+				page: message.page,
 				onProgress,
 			});
-			recognized = state;
-			return result;
+			return withScore(message.page, state, result);
 		}
 		case "edit": {
-			const run = edits.then(() => {
-				if (!recognized) {
-					throw new Error("Nothing to edit: recognize the page again");
+			const run = edits.then(async () => {
+				const state = pages[message.page]?.state;
+				if (!state) {
+					throw new Error("Nothing to edit: recognize the pages again");
 				}
-				return editRecognition(recognized, message.ops, { onProgress });
+				const result = await editRecognition(state, message.ops, {
+					onProgress,
+				});
+				return withScore(message.page, state, result);
 			});
 			edits = run.catch(() => {});
 			return run;

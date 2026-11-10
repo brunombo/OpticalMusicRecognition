@@ -9,20 +9,21 @@ const omr = useOmrState();
 <template>
 	<figure class="photo-corners">
 		<PageCorners
-			v-model="omr.quad"
-			:src="omr.previewUrl"
-			:width="omr.sourceImage.width"
-			:height="omr.sourceImage.height"
+			:key="omr.page.id"
+			v-model="omr.page.quad"
+			:src="omr.page.previewUrl"
+			:width="omr.page.image.width"
+			:height="omr.page.image.height"
 			@commit="omr.onCornersCommit"
 		/>
 		<figcaption>
-			<template v-if="omr.captureState === 'detecting'">Looking for the page…</template>
-			<template v-else-if="omr.captureState === 'found'">Page found. Drag the corners to adjust.</template>
-			<template v-else-if="omr.captureState === 'not-found'">No page found. Drag the corners onto the page's corners.</template>
-			<template v-else-if="omr.captureState === 'error'">Page detection unavailable ({{ omr.captureError }}). Drag the corners onto the page's corners.</template>
+			<template v-if="omr.page.captureState === 'detecting'">Looking for the page…</template>
+			<template v-else-if="omr.page.captureState === 'found'">Page found. Drag the corners to adjust.</template>
+			<template v-else-if="omr.page.captureState === 'not-found'">No page found. Drag the corners onto the page's corners.</template>
+			<template v-else-if="omr.page.captureState === 'error'">Page detection unavailable ({{ omr.page.captureError }}). Drag the corners onto the page's corners.</template>
 		</figcaption>
 		<div class="row">
-			<button class="secondary" :disabled="!omr.detectedQuad" @click="omr.resetCorners">
+			<button class="secondary" :disabled="!omr.page.detectedQuad" @click="omr.resetCorners">
 				Reset corners
 			</button>
 			<button class="secondary" @click="omr.useWholePhoto">Whole photo</button>

@@ -2,9 +2,10 @@
 // The recognized score, editable: a note or rest picked on the score (click,
 // or ← → from one to the next) can have its pitch, value, dots and accidental
 // changed, become a rest / a note, or be deleted; missed notes and rests are
-// added on the page. Edits are a list of operations (see pipeline/edit.js)
-// replayed by the recognition worker on its reading of the page, so undo and
-// redo are one operation less or more. Hovering a note shows it on the page.
+// added on their page. Edits are a list of operations (see pipeline/edit.js),
+// each on a page, replayed by the recognition worker on its reading of that
+// page, so undo and redo are one operation less or more. Hovering a note
+// shows it on its page.
 import {
 	computed,
 	nextTick,
@@ -17,16 +18,16 @@ import {
 import { download } from "../download.js";
 import { editRecognition } from "../pipeline/index.js";
 import { addedDet, boxKey, VALUES } from "../pipeline/place.js";
-import { musicXmlToMidi, renderMusicXml } from "../render/verovio.js";
+import { musicXmlToMidi } from "../render/verovio.js";
+import { buildScore } from "../score.js";
 import AddSymbols from "./AddSymbols.vue";
 import PageHighlight from "./PageHighlight.vue";
 
 const props = defineProps({
-	// { musicXml, summary, symbols, staves, svg } from the recognition
+	// the recognition (see score.js buildScore)
 	initial: { type: Object, required: true },
-	pageUrl: { type: String, default: null },
-	pageWidth: { type: Number, required: true },
-	pageHeight: { type: Number, required: true },
+	// the pages as recognized, in order: { url, width, height }
+	pages: { type: Array, required: true },
 	active: { type: Boolean, default: true }, // shown (keys act on it)
 });
 
@@ -39,9 +40,12 @@ const editError = ref(null);
 const unplaced = ref(0);
 const adding = ref(false);
 const addCls = ref("note_quarter");
+const addPage = ref(0);
+const pageOf = (i) => props.pages[i] ?? null;
+const canAdd = computed(() => props.pages.some((p) => p.url));
 
 const hoveredId = ref(null);
-const selectedKey = ref(null); // symbols are named by their box
+const selectedKey = ref(null); // symbols are named by their page and box
 const scoreEl = ref(null);
 
 const byId = computed(
@@ -55,34 +59,57 @@ const shown = computed(
 	() => byId.value.get(hoveredId.value) ?? selected.value ?? null,
 );
 const isNote = computed(() => selected.value?.family === "note");
+// the page shown beside the score: the hovered / selected note's (else the
+// last one shown)
+const lastPage = ref(0);
+const shownPage = computed(() => shown.value?.page ?? lastPage.value);
+watch(shownPage, (p) => {
+	lastPage.value = p;
+});
+const highlightPage = computed(() => pageOf(shownPage.value));
 const value = (s) => s.cls.split("_")[1];
 
 // ---------------------------------------------------------------- editing
 
 let editRun = 0;
+// the pages' latest results: an edit superseded before it is shown still
+// changed its page (the worker applies them all, in order)
+let latest = [...props.initial.pageResults];
 
-/** Replay all the edits; then select `select` (a symbol's key), if given. */
-async function replay(select = null) {
+/**
+ * Replay all the edits of the pages `pages`; then select `select` (a
+ * symbol's key), if given.
+ */
+async function replay(pages, select = null) {
 	const run = ++editRun;
 	editing.value = true;
 	editError.value = null;
 	try {
-		const next = await editRecognition(ops.value, {
-			onProgress: (p) => {
-				if (run === editRun) {
-					editProgress.value = p;
-				}
-			},
-		});
-		const svg =
-			next.summary.notes + next.summary.rests > 0
-				? await renderMusicXml(next.musicXml)
-				: [];
-		if (run !== editRun) {
+		let musicXml = null;
+		for (const page of pages) {
+			const next = await editRecognition(
+				page,
+				ops.value.filter((op) => op.page === page),
+				{
+					onProgress: (p) => {
+						if (run === editRun) {
+							editProgress.value = p;
+						}
+					},
+				},
+			);
+			latest = latest.map((r, i) => (i === page ? next : r));
+			({ musicXml } = next);
+		}
+		if (run !== editRun || musicXml === null) {
 			return; // a later edit supersedes this one
 		}
-		result.value = { ...next, svg };
-		unplaced.value = next.unplaced ?? 0;
+		const score = await buildScore(latest, musicXml);
+		if (run !== editRun) {
+			return;
+		}
+		result.value = score;
+		unplaced.value = score.unplaced;
 		if (select !== null) {
 			selectedKey.value = select;
 		}
@@ -102,37 +129,40 @@ async function replay(select = null) {
 function apply(op, select = null) {
 	ops.value = [...ops.value, op];
 	undone.value = [];
-	replay(select);
+	replay([op.page], select);
 }
 
 function set(field, v) {
 	const s = selected.value;
 	if (s) {
-		apply({ type: "set", box: s.box, field, value: v }, s.key);
+		apply({ type: "set", page: s.page, box: s.box, field, value: v }, s.key);
 	}
 }
 
 function undo() {
-	if (ops.value.length) {
-		undone.value = [...undone.value, ops.value.at(-1)];
+	const op = ops.value.at(-1);
+	if (op) {
+		undone.value = [...undone.value, op];
 		ops.value = ops.value.slice(0, -1);
-		replay();
+		replay([op.page]);
 	}
 }
 
 function redo() {
-	if (undone.value.length) {
-		ops.value = [...ops.value, undone.value.at(-1)];
+	const op = undone.value.at(-1);
+	if (op) {
+		ops.value = [...ops.value, op];
 		undone.value = undone.value.slice(0, -1);
-		replay();
+		replay([op.page]);
 	}
 }
 
 function resetEdits() {
 	if (ops.value.length) {
+		const pages = [...new Set(ops.value.map((op) => op.page))];
 		undone.value = [...undone.value, ...[...ops.value].reverse()];
 		ops.value = [];
-		replay();
+		replay(pages);
 	}
 }
 
@@ -148,16 +178,35 @@ function remove() {
 	if (s) {
 		const next = neighbour(1) ?? neighbour(-1);
 		apply(
-			{ type: "set", box: s.box, field: "deleted", value: true },
+			{ type: "set", page: s.page, box: s.box, field: "deleted", value: true },
 			next?.key ?? null,
 		);
 	}
 }
 
+const addStaves = computed(
+	() => result.value.pageResults[addPage.value]?.staves ?? [],
+);
+const addSymbols = computed(() =>
+	result.value.symbols.filter((s) => s.page === addPage.value),
+);
+
 function add(at) {
-	const det = addedDet(addCls.value, at, result.value.staves);
+	const page = addPage.value;
+	const det = addedDet(addCls.value, at, addStaves.value);
 	if (det) {
-		apply({ type: "add", cls: addCls.value, at }, boxKey(det.xyxy));
+		apply(
+			{ type: "add", page, cls: addCls.value, at },
+			`${page}:${boxKey(det.xyxy)}`,
+		);
+	}
+}
+
+/** Adding: start on the page of the selected note, if any. */
+function toggleAdding() {
+	adding.value = !adding.value;
+	if (adding.value && selected.value) {
+		addPage.value = selected.value.page;
 	}
 }
 
@@ -322,6 +371,11 @@ const ACCIDENTALS = { "-2": "𝄫", "-1": "♭", 0: "", 1: "♯", 2: "𝄪" };
 const DOTS = ["", " dotted", " double-dotted"];
 
 function describe(s) {
+	const where = props.pages.length > 1 ? ` · page ${s.page + 1}` : "";
+	return describeSymbol(s) + where;
+}
+
+function describeSymbol(s) {
 	const length = `${value(s)}${DOTS[s.dots] ?? ""}`;
 	if (s.family === "rest") {
 		return `${length} rest`;
@@ -375,6 +429,7 @@ async function downloadMidi() {
 	<div class="score-editor">
 		<div class="toolbar">
 			<span class="summary" :title="`${result.summary.staves} staves in ${result.summary.systems} systems; ${result.summary.changed} corrected from context`">
+				<template v-if="pages.length > 1">{{ pages.length }} pages · </template>
 				{{ result.summary.notes }} notes, {{ result.summary.rests }} rests<template v-if="result.summary.edited"> · {{ result.summary.edited }} edited</template>
 			</span>
 			<div class="group">
@@ -385,8 +440,8 @@ async function downloadMidi() {
 			<button
 				class="secondary"
 				:aria-pressed="adding"
-				:disabled="!pageUrl"
-				@click="adding = !adding"
+				:disabled="!canAdd"
+				@click="toggleAdding"
 			>
 				{{ adding ? "Stop adding" : "+ Add missed notes" }}
 			</button>
@@ -407,13 +462,15 @@ async function downloadMidi() {
 			<span v-else class="hint">A first draft: click a note to correct it.</span>
 		</p>
 		<AddSymbols
-			v-if="adding && pageUrl"
+			v-if="adding && pageOf(addPage)?.url"
 			v-model:cls="addCls"
-			:src="pageUrl"
-			:width="pageWidth"
-			:height="pageHeight"
-			:symbols="result.symbols"
-			:staves="result.staves"
+			v-model:page="addPage"
+			:page-count="pages.length"
+			:src="pageOf(addPage).url"
+			:width="pageOf(addPage).width"
+			:height="pageOf(addPage).height"
+			:symbols="addSymbols"
+			:staves="addStaves"
 			@add="add"
 			@done="adding = false"
 		/>
@@ -479,10 +536,11 @@ async function downloadMidi() {
 					<p class="hint keys">← → previous / next · Esc deselect</p>
 				</div>
 				<PageHighlight
-					v-if="pageUrl"
-					:src="pageUrl"
-					:width="pageWidth"
-					:height="pageHeight"
+					v-if="highlightPage?.url"
+					:key="shownPage"
+					:src="highlightPage.url"
+					:width="highlightPage.width"
+					:height="highlightPage.height"
 					:box="shown?.box ?? null"
 				/>
 			</div>

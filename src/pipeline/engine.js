@@ -286,34 +286,36 @@ export async function prepare(size, { onProgress } = {}) {
 }
 
 /**
- * Recognize an RGBA page. `state` (kept by the worker, not posted) is what
- * editRecognition needs to apply hand edits later.
+ * Recognize an RGBA page (page `page` of the score). `state` (kept by the
+ * worker, not posted) is what editRecognition needs to apply hand edits
+ * later; `tree` (also kept) is its MusicXML, to join with the other pages.
  * @returns {Promise<{ musicXml: string, summary: object, symbols: object[], staves: object[], state: object }>}
  */
-export async function recognize(size, image, { onProgress } = {}) {
+export async function recognize(size, image, { page = 0, onProgress } = {}) {
 	const { models, meta } = await prepare(size, {
 		onProgress: (p) => onProgress?.({ stage: p.stage, ratio: p.ratio * 0.2 }),
 	});
-	const page = {
+	const gray = {
 		data: rgbaToGray(image.data, image.width, image.height),
 		width: image.width,
 		height: image.height,
 	};
-	const { reading, dets } = await recognizePage(page, models, meta, {
+	const { reading, dets } = await recognizePage(gray, models, meta, {
 		onProgress: (p) =>
 			onProgress?.({ stage: p.stage, ratio: 0.2 + p.ratio * 0.8 }),
 	});
 	const staves = stavesOf(reading);
 	const state = {
+		index: page,
 		size,
-		page,
+		page: gray,
 		dets,
 		staves,
 		base: reading,
 		reading,
 		adds: "[]",
 	};
-	return { ...resultOf(reading), staves, state };
+	return { ...resultOf(reading, new Set(), page), staves, state };
 }
 
 /**
@@ -343,10 +345,12 @@ export async function editRecognition(state, ops, { onProgress } = {}) {
 		state.adds = adds;
 	}
 	const { reading, edited } = applyEdits(state.reading, ops, state.staves);
-	const result = resultOf(reading, edited);
+	const result = resultOf(reading, edited, state.index);
 	// added symbols the reader could not place (no staff or bar) are reported
 	const placed = new Set(result.symbols.map((s) => s.key));
-	const unplaced = added.filter((d) => !placed.has(boxKey(d.xyxy))).length;
+	const unplaced = added.filter(
+		(d) => !placed.has(`${state.index}:${boxKey(d.xyxy)}`),
+	).length;
 	return { ...result, staves: state.staves, unplaced };
 }
 

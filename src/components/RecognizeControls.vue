@@ -14,7 +14,9 @@ const omr = useOmrState();
 				</option>
 			</select>
 			<button :disabled="!omr.canRun" @click="omr.run">
-				{{ omr.running ? "Restart" : "Recognize" }}
+				{{ omr.running ? "Restart" : "Recognize" }}{{
+					omr.pages.length > 1 ? ` ${omr.pages.length} pages` : ""
+				}}
 			</button>
 			<button v-if="omr.running" class="secondary" @click="omr.stop">Stop</button>
 		</div>

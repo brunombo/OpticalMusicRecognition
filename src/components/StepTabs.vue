@@ -1,12 +1,13 @@
 <script setup>
-// The app, one step at a time: the photo and its corners, the page and its
-// preparation (and Recognize), the score. A new photo opens Photo (to check
-// the corners), a finished recognition opens Score.
-import { ref, watch } from "vue";
+// The app, one step at a time: the photos and their corners, the pages and
+// their preparation (and Recognize), the score. New photos open Photo (to
+// check the corners), a finished recognition opens Score.
+import { computed, ref, watch } from "vue";
 import { useOmrState } from "../useOmr.js";
 import ImageSource from "./ImageSource.vue";
 import PagePreview from "./PagePreview.vue";
 import PageSettings from "./PageSettings.vue";
+import PageStrip from "./PageStrip.vue";
 import PhotoCorners from "./PhotoCorners.vue";
 import RecognizeControls from "./RecognizeControls.vue";
 import ScoreEditor from "./ScoreEditor.vue";
@@ -15,8 +16,8 @@ const omr = useOmrState();
 
 const tab = ref(omr.result ? "score" : "photo");
 const TABS = [
-	["photo", "1 · Photo", () => true],
-	["page", "2 · Page", () => omr.sourceImage !== null],
+	["photo", "1 · Photos", () => true],
+	["page", "2 · Pages", () => omr.pages.length > 0],
 	["score", "3 · Score", () => omr.result !== null],
 ];
 
@@ -27,10 +28,20 @@ watch(
 	},
 );
 watch(
-	() => omr.sourceImage,
-	() => {
-		tab.value = "photo";
+	() => omr.pages.length,
+	(n, before) => {
+		if (n > before || n === 0) {
+			tab.value = "photo";
+		}
 	},
+);
+
+const pageViews = computed(() =>
+	omr.pages.map((p) => ({
+		url: p.pageUrl,
+		width: p.pageImage?.width ?? 0,
+		height: p.pageImage?.height ?? 0,
+	})),
 );
 </script>
 
@@ -50,16 +61,18 @@ watch(
 
 	<section v-show="tab === 'photo'" class="panel">
 		<ImageSource />
-		<template v-if="omr.sourceImage && omr.previewUrl">
+		<template v-if="omr.page">
+			<PageStrip show="photo" />
 			<PhotoCorners class="big" />
 			<div class="row next">
-				<button @click="tab = 'page'">Next: the page →</button>
+				<button @click="tab = 'page'">Next: {{ omr.pages.length > 1 ? "the pages" : "the page" }} →</button>
 			</div>
 		</template>
 	</section>
 
 	<section v-show="tab === 'page'" class="panel">
-		<div v-if="omr.sourceImage" class="page-step">
+		<PageStrip v-if="omr.pages.length > 1" show="page" />
+		<div v-if="omr.page" class="page-step">
 			<PagePreview />
 			<div class="controls">
 				<PageSettings />
@@ -72,9 +85,7 @@ watch(
 		<ScoreEditor
 			v-if="omr.result"
 			:initial="omr.result"
-			:page-url="omr.pageUrl"
-			:page-width="omr.pageImage?.width ?? 0"
-			:page-height="omr.pageImage?.height ?? 0"
+			:pages="pageViews"
 			:active="tab === 'score'"
 		/>
 	</section>
@@ -105,7 +116,7 @@ watch(
 }
 
 .big {
-	margin: 1rem 0 0;
+	margin: 0.5rem 0 0;
 }
 
 .next {

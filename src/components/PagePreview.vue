@@ -8,20 +8,20 @@ const omr = useOmrState();
 <template>
 	<figure class="page-preview">
 		<img
-			v-if="omr.pageUrl"
-			:src="omr.pageUrl"
+			v-if="omr.page.pageUrl"
+			:src="omr.page.pageUrl"
 			class="page"
-			:class="{ stale: omr.flattening }"
+			:class="{ stale: omr.page.flattening }"
 			alt="The page, flattened and cleaned"
 		/>
 		<div v-else class="page placeholder">
-			{{ omr.captureState === "detecting" ? "" : "Flattening…" }}
+			{{ omr.page.captureState === "detecting" ? "" : "Flattening…" }}
 		</div>
 		<figcaption>The page as it will be recognized.</figcaption>
 		<div class="row">
 			<button
 				class="secondary"
-				:disabled="!omr.pageImage || omr.flattening"
+				:disabled="!omr.page.pageImage || omr.page.flattening"
 				@click="omr.downloadPage"
 			>
 				Download page

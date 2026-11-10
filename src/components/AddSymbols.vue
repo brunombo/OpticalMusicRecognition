@@ -13,8 +13,10 @@ const props = defineProps({
 	symbols: { type: Array, required: true }, // { key, box, edited }
 	staves: { type: Array, required: true },
 	cls: { type: String, required: true }, // v-model:cls
+	page: { type: Number, default: 0 }, // v-model:page, of pageCount
+	pageCount: { type: Number, default: 1 },
 });
-const emit = defineEmits(["update:cls", "add", "done"]);
+const emit = defineEmits(["update:cls", "update:page", "add", "done"]);
 
 const label = (cls) => {
 	const [fam, value] = cls.split("_");
@@ -66,6 +68,17 @@ const rectOf = ([x0, y0, x1, y1]) => ({
 				>
 					<option v-for="c in ADDABLE" :key="c" :value="c">
 						{{ label(c) }}
+					</option>
+				</select>
+			</label>
+			<label v-if="pageCount > 1">
+				On page
+				<select
+					:value="page"
+					@change="emit('update:page', Number($event.target.value))"
+				>
+					<option v-for="i in pageCount" :key="i" :value="i - 1">
+						{{ i }}
 					</option>
 				</select>
 			</label>

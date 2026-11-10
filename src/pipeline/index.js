@@ -116,35 +116,51 @@ const copy = (image) => ({
 const plainQuad = (quad) => (quad ? quad.map(([x, y]) => [x, y]) : null);
 
 /**
- * Recognize an image with a detector size ("2m" or "28m"); with `quad`, the
- * page inside it is flattened and cleaned first, its lighting evened out at
- * `lighting` (0 … 1) and its tone at `strength` (0 … 2, see
- * capture/index.js).
+ * Recognize page `page` (of `count`, read in order from 0) with a detector
+ * size ("2m" or "28m"); with `quad`, the page inside it is flattened and
+ * cleaned first, its lighting evened out at `lighting` (0 … 1) and its tone
+ * at `strength` (0 … 2, see capture/index.js). `musicXml` is the score so
+ * far: the pages read, joined.
  * @returns {Promise<{ musicXml: string, summary: object, symbols: object[], staves: object[] }>}
  */
 export function runPipeline(
 	size,
 	image,
-	{ quad = null, strength = 0, lighting = 1, onProgress } = {},
+	{
+		page = 0,
+		count = 1,
+		quad = null,
+		strength = 0,
+		lighting = 1,
+		onProgress,
+	} = {},
 ) {
 	return call(
 		"recognize",
 		"recognize",
-		{ size, image: copy(image), quad: plainQuad(quad), strength, lighting },
+		{
+			size,
+			image: copy(image),
+			page,
+			count,
+			quad: plainQuad(quad),
+			strength,
+			lighting,
+		},
 		{ onProgress },
 	);
 }
 
 /**
- * The last recognition with hand edits applied (all of them, in order: see
- * edit.js); same result shape as runPipeline. Runs in the recognition
- * worker, which keeps that recognition (Stop discards it).
+ * Page `page` of the last recognition with its hand edits applied (all of
+ * them, in order: see edit.js); same result shape as runPipeline. Runs in
+ * the recognition worker, which keeps that recognition (Stop discards it).
  */
-export function editRecognition(ops, { onProgress } = {}) {
+export function editRecognition(page, ops, { onProgress } = {}) {
 	return call(
 		"recognize",
 		"edit",
-		{ ops: JSON.parse(JSON.stringify(ops)) },
+		{ page, ops: JSON.parse(JSON.stringify(ops)) },
 		{ onProgress },
 	);
 }

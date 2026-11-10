@@ -1,5 +1,6 @@
 <script setup>
-// Choose a photo or take one with the camera.
+// Add pages: images picked (several at once: in file-name order) or
+// photographed with the camera.
 import { onBeforeUnmount, ref } from "vue";
 import { imageFromSource } from "../pipeline/index.js";
 import { useOmrState } from "../useOmr.js";
@@ -10,22 +11,30 @@ const cameraActive = ref(false);
 const videoEl = ref(null);
 let cameraStream = null;
 
+const byName = new Intl.Collator(undefined, { numeric: true }).compare;
+
 async function onFileChange(event) {
-	const file = event.target.files?.[0];
-	if (!file) {
+	const files = [...(event.target.files ?? [])].sort((a, b) =>
+		byName(a.name, b.name),
+	);
+	event.target.value = "";
+	if (files.length === 0) {
 		return;
 	}
 	stopCamera();
-	event.target.value = "";
-	const bitmap = await createImageBitmap(file);
-	omr.setSource(
-		imageFromSource(bitmap, bitmap.width, bitmap.height),
-		URL.createObjectURL(file),
-	);
+	const images = [];
+	for (const file of files) {
+		const bitmap = await createImageBitmap(file);
+		images.push({
+			image: imageFromSource(bitmap, bitmap.width, bitmap.height),
+			url: URL.createObjectURL(file),
+		});
+		bitmap.close();
+	}
+	omr.addImages(images);
 }
 
 async function startCamera() {
-	omr.resetResult();
 	try {
 		cameraStream = await navigator.mediaDevices.getUserMedia({
 			video: { facingMode: "environment" },
@@ -55,7 +64,7 @@ function capturePhoto() {
 		.getContext("2d")
 		.putImageData(new ImageData(image.data, image.width, image.height), 0, 0);
 	stopCamera();
-	omr.setSource(image, canvas.toDataURL("image/png"));
+	omr.addImages([{ image, url: canvas.toDataURL("image/png") }]);
 }
 
 function stopCamera() {
@@ -75,11 +84,11 @@ onBeforeUnmount(stopCamera);
 	<div class="image-source">
 		<div class="row">
 			<label class="file-label">
-				{{ omr.sourceImage ? "Choose another image" : "Choose image" }}
-				<input type="file" accept="image/*" @change="onFileChange" />
+				{{ omr.pages.length ? "Add images" : "Choose images" }}
+				<input type="file" accept="image/*" multiple @change="onFileChange" />
 			</label>
 			<button v-if="!cameraActive" class="secondary" @click="startCamera">
-				Use camera
+				{{ omr.pages.length ? "Add a photo" : "Use camera" }}
 			</button>
 			<template v-else>
 				<button @click="capturePhoto">Capture</button>
@@ -87,8 +96,8 @@ onBeforeUnmount(stopCamera);
 			</template>
 		</div>
 		<p class="hint">
-			Printed music, flat page, even lighting, the whole page in frame. Phone
-			photos work.
+			One image per page, several for a longer piece. Printed music, flat
+			page, even lighting, the whole page in frame. Phone photos work.
 		</p>
 		<video v-if="cameraActive" ref="videoEl" autoplay playsinline></video>
 	</div>

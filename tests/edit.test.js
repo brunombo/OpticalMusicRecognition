@@ -1,5 +1,8 @@
+import { existsSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { applyEdits } from "../src/pipeline/edit.js";
+import { xmlDocument } from "../src/pipeline/copisteria/write.js";
+import { applyEdits, resultOf } from "../src/pipeline/edit.js";
+import { joinTrees } from "../src/pipeline/join.js";
 import {
 	addedDet,
 	boxKey,
@@ -123,4 +126,46 @@ describe("replaying hand edits", () => {
 		expect(edited.tok.get(1).real.p).toBe(0);
 		expect(edited.tok.get(0).pos.v).toBe(2);
 	});
+});
+
+// On real pages: needs the exported models (npm run fetch:models)
+const haveModels = existsSync("public/models/copista-2m-trunk.onnx");
+
+describe.skipIf(!haveModels)("several pages, one score", () => {
+	it("names each page's symbols apart and joins the pages", async () => {
+		const { loadGrayPng, loadModels } = await import(
+			"../scripts/copisteria-node.mjs"
+		);
+		const { recognizePage } = await import(
+			"../src/pipeline/copisteria/index.js"
+		);
+		const { models, meta } = await loadModels("2m");
+		const results = [];
+		for (const [page, name] of [
+			"Rondo-MuzioClementi-1",
+			"Rondo-MuzioClementi-2",
+		].entries()) {
+			const png = loadGrayPng(`test_images/${name}.png`);
+			const { reading } = await recognizePage(
+				{ data: png.gray, width: png.width, height: png.height },
+				models,
+				meta,
+			);
+			results.push(resultOf(reading, new Set(), page));
+		}
+		const [a, b] = results;
+		expect(b.symbols.every((s) => s.page === 1)).toBe(true);
+		expect(b.symbols[0].id).toMatch(/^p1-sym-\d+$/);
+		expect(b.symbols[0].key.startsWith("1:")).toBe(true);
+		expect(b.musicXml).toContain('id="p1-sym-');
+		// the joined score has every page's measures, numbered on
+		const joined = xmlDocument(joinTrees([a.tree, b.tree]));
+		const count = (xml) => (xml.match(/<measure /g) ?? []).length;
+		const parts = (xml) => (xml.match(/<part id=/g) ?? []).length;
+		const perPart = (xml) => count(xml) / parts(xml);
+		expect(perPart(joined)).toBe(perPart(a.musicXml) + perPart(b.musicXml));
+		expect((joined.match(/new-page="yes"/g) ?? []).length).toBe(parts(joined));
+		expect(joined).toContain('id="p0-sym-');
+		expect(joined).toContain('id="p1-sym-');
+	}, 120000);
 });

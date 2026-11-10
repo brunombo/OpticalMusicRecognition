@@ -1726,17 +1726,27 @@ function lcm(a, b) {
 const cmpDirs = (a, b) =>
 	cmpTuple([a[0], a[1], String(a[2])], [b[0], b[1], String(b[2])]);
 
-/** The page's MusicXML (score-partwise 4.0) from a reading. */
+/** A MusicXML element tree as a document (header, then the tree). */
+export const xmlDocument = (root) =>
+	'<?xml version="1.0" encoding="UTF-8"?>\n' +
+	'<!DOCTYPE score-partwise PUBLIC "-//Recordare//DTD MusicXML 4.0 Partwise//EN" ' +
+	'"http://www.musicxml.org/dtds/partwise.dtd">\n' +
+	toXmlString(root);
+
 /**
- * The reading as a MusicXML string. With `noteIds` (this app's addition),
- * each note and rest read from the page carries `id="sym-<symbol index>"`
- * (unique; repeated copies carry none), to find its symbol again, and
- * `written` (a Map), if given, receives each one as written: symbol index →
+ * The reading as a MusicXML string (score-partwise 4.0). With `noteIds`
+ * (this app's addition), each note and rest read from the page carries
+ * `id="<idPrefix>sym-<symbol index>"` (unique; repeated copies carry none),
+ * to find its symbol again, and `written` (a Map), if given, receives each
+ * one as written: symbol index →
  * { type, dots, pitch: { step, octave, alter } or null }.
  */
-export function write(
+export const write = (rd, options = {}) => xmlDocument(writeTree(rd, options));
+
+/** The reading's MusicXML as an element tree (see write). */
+export function writeTree(
 	rd,
-	{ title = null, noteIds = false, written = null } = {},
+	{ title = null, noteIds = false, written = null, idPrefix = "" } = {},
 ) {
 	const L = rd.layout;
 	const usedIds = new Set();
@@ -2183,7 +2193,7 @@ export function write(
 							);
 							if (noteIds && !e.copied && e.si >= 0 && !usedIds.has(e.si)) {
 								usedIds.add(e.si);
-								ne.set("id", `sym-${e.si}`);
+								ne.set("id", `${idPrefix}sym-${e.si}`);
 								written?.set(e.si, {
 									type: e.typ,
 									dots: e.dots,
@@ -2246,10 +2256,5 @@ export function write(
 			}
 		});
 	});
-	return (
-		'<?xml version="1.0" encoding="UTF-8"?>\n' +
-		'<!DOCTYPE score-partwise PUBLIC "-//Recordare//DTD MusicXML 4.0 Partwise//EN" ' +
-		'"http://www.musicxml.org/dtds/partwise.dtd">\n' +
-		toXmlString(root)
-	);
+	return root;
 }

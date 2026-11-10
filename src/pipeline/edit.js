@@ -10,7 +10,7 @@
 // over the reader's own choices.
 
 import { family } from "./copisteria/vocab.js";
-import { write } from "./copisteria/write.js";
+import { writeTree, xmlDocument } from "./copisteria/write.js";
 import { addedDet, boxKey } from "./place.js";
 
 export { ADDABLE, addedDet, boxKey, VALUES } from "./place.js";
@@ -131,12 +131,16 @@ export function applyEdits(reading, ops, staves) {
 }
 
 /**
- * MusicXML, the notes and rests (for the score ↔ page link and the editor)
- * and a summary, from a reading.
+ * MusicXML (and its element tree, to join pages: see join.js), the notes and
+ * rests (for the score ↔ page link and the editor) and a summary, from the
+ * reading of page `page` (0, 1, …). A symbol is named `<page>:<box>` (its
+ * key) and `p<page>-sym-<index>` (its id, also on the score's note).
  */
-export function resultOf(reading, edited = new Set()) {
+export function resultOf(reading, edited = new Set(), page = 0) {
 	const written = new Map();
-	const musicXml = write(reading, { noteIds: true, written });
+	const prefix = `p${page}-`;
+	const tree = writeTree(reading, { noteIds: true, written, idPrefix: prefix });
+	const musicXml = xmlDocument(tree);
 	const L = reading.layout;
 	const symbols = [];
 	for (const s of L.syms) {
@@ -150,8 +154,9 @@ export function resultOf(reading, edited = new Set()) {
 		}
 		const key = boxKey(s.box);
 		symbols.push({
-			id: `sym-${s.i}`,
-			key,
+			id: `${prefix}sym-${s.i}`,
+			key: `${page}:${key}`,
+			page,
 			box: s.box.map(Number),
 			family: fam,
 			cls: r.cls.v,
@@ -171,6 +176,7 @@ export function resultOf(reading, edited = new Set()) {
 	}
 	return {
 		musicXml,
+		tree,
 		symbols,
 		staves: stavesOf(reading),
 		summary: {
