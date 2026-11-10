@@ -7,11 +7,20 @@
 //                      (with a quad, the page inside it is flattened and
 //                      cleaned first with those settings, see
 //                      capture/index.js)
+//   task "edit":       { ops } → the last recognition with hand edits applied
+//                      (see edit.js), same shape
 
 import { flattenAndClean } from "./capture/index.js";
-import { describeError, detectPage, recognize } from "./engine.js";
+import {
+	describeError,
+	detectPage,
+	editRecognition,
+	recognize,
+} from "./engine.js";
 
 let current = null; // the run in progress, for errors raised outside it
+let recognized = null; // the last recognition's state, for edits
+let edits = Promise.resolve(); // edits run one at a time, in order
 
 const fail = (id, error) => {
 	console.error(error);
@@ -40,7 +49,22 @@ async function run(message, onProgress) {
 						lighting: message.lighting ?? 1,
 					})
 				: message.image;
-			return recognize(message.size, page, { onProgress });
+			recognized = null;
+			const { state, ...result } = await recognize(message.size, page, {
+				onProgress,
+			});
+			recognized = state;
+			return result;
+		}
+		case "edit": {
+			const run = edits.then(() => {
+				if (!recognized) {
+					throw new Error("Nothing to edit: recognize the page again");
+				}
+				return editRecognition(recognized, message.ops, { onProgress });
+			});
+			edits = run.catch(() => {});
+			return run;
 		}
 		default:
 			throw new Error(`unknown task ${message.task}`);

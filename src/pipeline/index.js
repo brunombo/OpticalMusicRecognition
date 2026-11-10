@@ -120,7 +120,7 @@ const plainQuad = (quad) => (quad ? quad.map(([x, y]) => [x, y]) : null);
  * page inside it is flattened and cleaned first, its lighting evened out at
  * `lighting` (0 … 1) and its tone at `strength` (0 … 2, see
  * capture/index.js).
- * @returns {Promise<{ musicXml: string, summary: object, symbols: object[] }>}
+ * @returns {Promise<{ musicXml: string, summary: object, symbols: object[], staves: object[] }>}
  */
 export function runPipeline(
 	size,
@@ -131,6 +131,20 @@ export function runPipeline(
 		"recognize",
 		"recognize",
 		{ size, image: copy(image), quad: plainQuad(quad), strength, lighting },
+		{ onProgress },
+	);
+}
+
+/**
+ * The last recognition with hand edits applied (all of them, in order: see
+ * edit.js); same result shape as runPipeline. Runs in the recognition
+ * worker, which keeps that recognition (Stop discards it).
+ */
+export function editRecognition(ops, { onProgress } = {}) {
+	return call(
+		"recognize",
+		"edit",
+		{ ops: JSON.parse(JSON.stringify(ops)) },
 		{ onProgress },
 	);
 }

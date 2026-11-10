@@ -14,15 +14,14 @@ import { write } from "./write.js";
  * Recognize one page.
  * @param {{ data: Uint8Array, width: number, height: number }} page 8-bit grey
  * @param {object} options `upstream: true` reads exactly as copisteria
- *   does (without this app's additions: fingering digits are kept);
- *   `noteIds: true` gives each note and rest an id (see write.js)
+ *   does (without this app's additions: fingering digits are kept)
  * @returns {Promise<{ musicXml: string, reading: object, dets: object[], imgsz: number }>}
  */
 export async function recognizePage(
 	page,
 	models,
 	meta,
-	{ onProgress, title, upstream = false, noteIds = false } = {},
+	{ onProgress, title, upstream = false } = {},
 ) {
 	const { data, width, height } = page;
 	onProgress?.({ stage: "detecting symbols", ratio: 0.05 });
@@ -37,29 +36,7 @@ export async function recognizePage(
 		gray: page,
 	});
 	onProgress?.({ stage: "writing MusicXML", ratio: 0.9 });
-	const musicXml = write(reading, { title, noteIds });
+	const musicXml = write(reading, { title });
 	onProgress?.({ stage: "done", ratio: 1 });
 	return { musicXml, reading, dets, imgsz };
-}
-
-/** Note heads the reading kept, for highlighting on the page (page pixels). */
-export function recognizedSymbols(reading) {
-	const out = [];
-	for (const s of reading.layout.syms) {
-		const r = reading.tok.get(s.i);
-		if (!r || r.real.p < 0.5) {
-			continue;
-		}
-		const family = r.cls.v.split("_")[0];
-		if (family === "note" || family === "rest") {
-			out.push({
-				id: `sym-${s.i}`,
-				box: s.box,
-				family,
-				cls: r.cls.v,
-				changed: r.cls.det !== undefined && r.cls.det !== r.cls.v,
-			});
-		}
-	}
-	return out;
 }

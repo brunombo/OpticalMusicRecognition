@@ -116,6 +116,14 @@ const ACCID_ALTER = {
 	natsharp: 1,
 	natflat: -1,
 };
+// an alteration set by hand (this app's editor) → the glyph it stands for
+const USER_ACCID = {
+	1: "sharp",
+	"-1": "flat",
+	0: "natural",
+	2: "dsharp",
+	"-2": "dflat",
+};
 const ORNAMENT = { trill: "trill-mark", mordent: "mordent" };
 const AFTER_MARK = { breath: "breath-mark", caesura: "caesura" };
 const OCTAVE = {
@@ -597,6 +605,17 @@ function decodeAlters(rd, syms, evs, sp) {
 		}
 		used.add(gi);
 		glyph.set(ei, [alt, kind]);
+	}
+	// alterations set by hand act as a glyph written before the note ("key":
+	// as the key signature, whatever glyph was read)
+	for (const e of heads) {
+		const a = rd.tok.get(e.si).alter;
+		if (a?.user) {
+			glyph.delete(e.si);
+			if (a.v !== "key") {
+				glyph.set(e.si, [a.v, USER_ACCID[a.v]]);
+			}
+		}
 	}
 	const held = new Map();
 	for (const e of [...heads].sort(
@@ -1711,9 +1730,14 @@ const cmpDirs = (a, b) =>
 /**
  * The reading as a MusicXML string. With `noteIds` (this app's addition),
  * each note and rest read from the page carries `id="sym-<symbol index>"`
- * (unique; repeated copies carry none), to find its symbol again.
+ * (unique; repeated copies carry none), to find its symbol again, and
+ * `written` (a Map), if given, receives each one as written: symbol index →
+ * { type, dots, pitch: { step, octave, alter } or null }.
  */
-export function write(rd, { title = null, noteIds = false } = {}) {
+export function write(
+	rd,
+	{ title = null, noteIds = false, written = null } = {},
+) {
 	const L = rd.layout;
 	const usedIds = new Set();
 	const plans = planParts(rd);
@@ -2160,6 +2184,14 @@ export function write(rd, { title = null, noteIds = false } = {}) {
 							if (noteIds && !e.copied && e.si >= 0 && !usedIds.has(e.si)) {
 								usedIds.add(e.si);
 								ne.set("id", `sym-${e.si}`);
+								written?.set(e.si, {
+									type: e.typ,
+									dots: e.dots,
+									pitch:
+										e.kind === "note" && !e.unpitched
+											? { step: e.step, octave: e.octave, alter: e.alter }
+											: null,
+								});
 							}
 							for (const [kind, payload, below] of e.post) {
 								direction(

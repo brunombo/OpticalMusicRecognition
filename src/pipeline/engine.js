@@ -11,8 +11,10 @@ import ortMjsUrl from "onnxruntime-web/ort-wasm-simd-threaded.jsep.mjs?url";
 import ortWasmUrl from "onnxruntime-web/ort-wasm-simd-threaded.jsep.wasm?url";
 import { DOCALIGNER_FILE, detectCorners } from "./capture/docaligner.js";
 import { rgbaToGray } from "./copisteria/image.js";
-import { recognizedSymbols, recognizePage } from "./copisteria/index.js";
+import { recognizePage } from "./copisteria/index.js";
+import { readRevised } from "./copisteria/read.js";
 import { createModels, META_FILE, modelFiles } from "./copisteria/runtime.js";
+import { addedDets, applyEdits, boxKey, resultOf, stavesOf } from "./edit.js";
 
 // Where the models are served: VITE_MODELS_URL when set at build time (another
 // host), else the site's own models/ folder.
@@ -284,37 +286,68 @@ export async function prepare(size, { onProgress } = {}) {
 }
 
 /**
- * Recognize an RGBA page.
- * @returns {Promise<{ musicXml: string, summary: object, symbols: object[] }>}
+ * Recognize an RGBA page. `state` (kept by the worker, not posted) is what
+ * editRecognition needs to apply hand edits later.
+ * @returns {Promise<{ musicXml: string, summary: object, symbols: object[], staves: object[], state: object }>}
  */
 export async function recognize(size, image, { onProgress } = {}) {
 	const { models, meta } = await prepare(size, {
 		onProgress: (p) => onProgress?.({ stage: p.stage, ratio: p.ratio * 0.2 }),
 	});
-	const gray = rgbaToGray(image.data, image.width, image.height);
-	const { musicXml, reading } = await recognizePage(
-		{ data: gray, width: image.width, height: image.height },
-		models,
-		meta,
-		{
-			noteIds: true, // to link the score's notes to the page
-			onProgress: (p) =>
-				onProgress?.({ stage: p.stage, ratio: 0.2 + p.ratio * 0.8 }),
-		},
-	);
-	const L = reading.layout;
-	const symbols = recognizedSymbols(reading);
-	return {
-		musicXml,
-		symbols,
-		summary: {
-			staves: L.staves.length,
-			systems: L.systems.length,
-			notes: symbols.filter((s) => s.family === "note").length,
-			rests: symbols.filter((s) => s.family === "rest").length,
-			changed: symbols.filter((s) => s.changed).length,
-		},
+	const page = {
+		data: rgbaToGray(image.data, image.width, image.height),
+		width: image.width,
+		height: image.height,
 	};
+	const { reading, dets } = await recognizePage(page, models, meta, {
+		onProgress: (p) =>
+			onProgress?.({ stage: p.stage, ratio: 0.2 + p.ratio * 0.8 }),
+	});
+	const staves = stavesOf(reading);
+	const state = {
+		size,
+		page,
+		dets,
+		staves,
+		base: reading,
+		reading,
+		adds: "[]",
+	};
+	return { ...resultOf(reading), staves, state };
+}
+
+/**
+ * The recognition with hand edits (see edit.js) applied: the page is read
+ * again from its detections, plus the symbols added by hand, when those
+ * change; otherwise only the MusicXML is written again.
+ */
+export async function editRecognition(state, ops, { onProgress } = {}) {
+	const added = addedDets(ops, state.staves);
+	const adds = JSON.stringify(added.map((d) => d.xyxy));
+	if (adds !== state.adds) {
+		if (added.length === 0) {
+			state.reading = state.base;
+		} else {
+			onProgress?.({ stage: "reading in context", ratio: 0.3 });
+			const { models, meta } = await prepare(state.size);
+			// the added ones first: a detection's index breaks confidence ties
+			state.reading = await readRevised(
+				[...added, ...state.dets],
+				state.page.width,
+				state.page.height,
+				models,
+				meta,
+				{ gray: state.page },
+			);
+		}
+		state.adds = adds;
+	}
+	const { reading, edited } = applyEdits(state.reading, ops, state.staves);
+	const result = resultOf(reading, edited);
+	// added symbols the reader could not place (no staff or bar) are reported
+	const placed = new Set(result.symbols.map((s) => s.key));
+	const unplaced = added.filter((d) => !placed.has(boxKey(d.xyxy))).length;
+	return { ...result, staves: state.staves, unplaced };
 }
 
 let docAligner = null;

@@ -1,7 +1,7 @@
 <script setup>
 import { computed, onBeforeUnmount, ref, shallowRef, watch } from "vue";
 import PageCorners from "./components/PageCorners.vue";
-import PageHighlight from "./components/PageHighlight.vue";
+import ScoreEditor from "./components/ScoreEditor.vue";
 import { fullQuad } from "./pipeline/capture/index.js";
 import {
 	detectPageCorners,
@@ -11,23 +11,16 @@ import {
 	runPipeline,
 	stopRecognition,
 } from "./pipeline/index.js";
-import { musicXmlToMidi, renderMusicXml } from "./render/verovio.js";
+import { renderMusicXml } from "./render/verovio.js";
 
 const engineId = ref("2m");
 const previewUrl = ref(null);
 const running = ref(false);
 const progress = ref(null);
 const error = ref(null);
-const musicXml = ref(null);
-const svgPages = ref([]);
-const summary = ref(null);
-// The recognized notes and rests by id (the score's SVG carries the same
-// ids): hovering one on the score shows it on the page.
-const symbolBoxes = shallowRef(new Map());
-const hovered = shallowRef(null); // the score's element under the pointer
-const hoveredBox = computed(() =>
-	hovered.value ? (symbolBoxes.value.get(hovered.value.id) ?? null) : null,
-);
+// the recognition: { musicXml, summary, symbols, staves, svg }, edited in
+// ScoreEditor (a new one starts it afresh)
+const result = shallowRef(null);
 
 const cameraActive = ref(false);
 const videoEl = ref(null);
@@ -77,10 +70,7 @@ function stop() {
 function resetResult() {
 	stop();
 	error.value = null;
-	musicXml.value = null;
-	svgPages.value = [];
-	symbolBoxes.value = new Map();
-	hover(null);
+	result.value = null;
 }
 
 /** A new photo: show it, then look for the page's corners. */
@@ -260,7 +250,7 @@ async function run() {
 	running.value = true;
 	progress.value = { stage: "starting", ratio: 0 };
 	try {
-		const result = await runPipeline(engineId.value, sourceImage.value, {
+		const recognized = await runPipeline(engineId.value, sourceImage.value, {
 			quad: quad.value,
 			strength: strength.value / 100,
 			lighting: lighting.value / 100,
@@ -271,16 +261,13 @@ async function run() {
 			},
 		});
 		const svg =
-			result.summary.notes + result.summary.rests > 0
-				? await renderMusicXml(result.musicXml)
+			recognized.summary.notes + recognized.summary.rests > 0
+				? await renderMusicXml(recognized.musicXml)
 				: [];
 		if (run !== recognitionRun) {
 			return; // stopped or restarted meanwhile
 		}
-		musicXml.value = result.musicXml;
-		summary.value = result.summary;
-		symbolBoxes.value = new Map(result.symbols.map((s) => [s.id, s.box]));
-		svgPages.value = svg;
+		result.value = { ...recognized, svg };
 	} catch (e) {
 		if (run === recognitionRun) {
 			console.error(e);
@@ -292,68 +279,6 @@ async function run() {
 			progress.value = null;
 		}
 	}
-}
-
-function download(name, blob) {
-	const url = URL.createObjectURL(blob);
-	const a = document.createElement("a");
-	a.href = url;
-	a.download = name;
-	a.click();
-	URL.revokeObjectURL(url);
-}
-
-/** Mark a note or rest of the score (or none) as hovered. */
-function hover(element) {
-	hovered.value?.classList.remove("hovered");
-	hovered.value = element;
-	element?.classList.add("hovered");
-}
-
-/**
- * The pointer moved over the score (or tapped it): the nearest note or rest
- * within a few pixels (Verovio's glyphs are thin, hit-testing them misses).
- * The last one stays marked when the pointer leaves.
- */
-function onScorePointer(event) {
-	const { clientX: x, clientY: y, currentTarget } = event;
-	let best = null;
-	let bestDistance = 8; // px
-	for (const element of currentTarget.querySelectorAll("g.note, g.rest")) {
-		if (!symbolBoxes.value.has(element.id)) {
-			continue;
-		}
-		const r = element.getBoundingClientRect();
-		const dx = Math.max(r.left - x, 0, x - r.right);
-		const dy = Math.max(r.top - y, 0, y - r.bottom);
-		// inside several (a chord's notes share a stem): the closest centre
-		const centre = Math.hypot(
-			x - (r.left + r.right) / 2,
-			y - (r.top + r.bottom) / 2,
-		);
-		const distance = Math.hypot(dx, dy) + 0.01 * centre;
-		if (distance < bestDistance) {
-			best = element;
-			bestDistance = distance;
-		}
-	}
-	if (best && best !== hovered.value) {
-		hover(best);
-	}
-}
-
-function downloadMusicXml() {
-	download(
-		"score.musicxml",
-		new Blob([musicXml.value], {
-			type: "application/vnd.recordare.musicxml+xml",
-		}),
-	);
-}
-
-async function downloadMidi() {
-	const bytes = await musicXmlToMidi(musicXml.value);
-	download("score.mid", new Blob([bytes], { type: "audio/midi" }));
 }
 </script>
 
@@ -488,40 +413,14 @@ async function downloadMidi() {
 			<p v-if="error" class="error">{{ error }}</p>
 		</section>
 
-		<section v-if="musicXml" class="panel">
+		<section v-if="result" class="panel">
 			<h2>3. Result</h2>
-			<p class="hint">
-				{{ summary.staves }} staves in {{ summary.systems }} systems,
-				{{ summary.notes }} notes and {{ summary.rests }} rests read
-				({{ summary.changed }} corrected from context). Treat this as a
-				first draft — recognition is never perfect.
-			</p>
-			<div v-if="svgPages.length > 0" class="result-view">
-				<div
-					class="score-view"
-					@pointermove="onScorePointer"
-					@pointerdown="onScorePointer"
-				>
-					<!-- SVG produced locally by Verovio from our own MusicXML -->
-					<!-- eslint-disable-next-line vue/no-v-html -->
-					<div v-for="(svg, i) in svgPages" :key="i" v-html="svg"></div>
-				</div>
-				<PageHighlight
-					v-if="pageUrl && pageImage"
-					class="source-page"
-					:src="pageUrl"
-					:width="pageImage.width"
-					:height="pageImage.height"
-					:box="hoveredBox"
-				/>
-			</div>
-			<p v-else class="hint">No notes found — nothing to render.</p>
-			<div class="row" style="margin-top: 0.75rem">
-				<button @click="downloadMusicXml">Download MusicXML</button>
-				<button class="secondary" :disabled="summary.notes === 0" @click="downloadMidi">
-					Download MIDI
-				</button>
-			</div>
+			<ScoreEditor
+				:initial="result"
+				:page-url="pageUrl"
+				:page-width="pageImage?.width ?? 0"
+				:page-height="pageImage?.height ?? 0"
+			/>
 		</section>
 	</div>
 </template>

@@ -195,15 +195,16 @@ input[type="file"] {
 	height: auto;
 }
 
-/* score | the page as recognized (kept in view while the score scrolls) */
+/* score | the selected note's tools and the page (kept in view while the
+   score scrolls) */
 .result-view {
 	display: grid;
-	grid-template-columns: minmax(0, 1fr) minmax(220px, 34%);
+	grid-template-columns: minmax(0, 1fr) minmax(240px, 36%);
 	gap: 1rem;
 	align-items: start;
 }
 
-.source-page {
+.result-view .side {
 	position: sticky;
 	top: 0.5rem;
 }
@@ -213,24 +214,34 @@ input[type="file"] {
 		grid-template-columns: minmax(0, 1fr);
 	}
 
-	/* above the score, pinned: the magnified view only */
-	.source-page {
+	/* above the score, pinned: the tools and the magnified view only */
+	.result-view .side {
 		order: -1;
 		z-index: 1;
 		background: var(--panel);
 		padding-bottom: 0.5rem;
 	}
 
-	.source-page .whole {
+	.result-view .side .whole {
 		display: none;
 	}
 }
 
-/* the note or rest hovered on the score, also marked on the page */
+/* the note or rest hovered / selected on the score, also shown on the page */
+.score-view {
+	cursor: pointer;
+}
+
 .score-view g.hovered {
 	color: #e65028;
 	fill: #e65028;
 	stroke: #e65028;
+}
+
+.score-view g.selected {
+	color: #2a7de1;
+	fill: #2a7de1;
+	stroke: #2a7de1;
 }
 
 .error {
