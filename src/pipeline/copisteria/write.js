@@ -528,13 +528,15 @@ function events(rd, staff, bar, clef, key) {
 			dirs.push([s.cx, "dyn", c.slice("dynam_".length), s.cy > st.mid]);
 		} else if (
 			f === "hairpin" &&
-			(c === "hairpin_cres" || c === "hairpin_dim")
+			(c === "hairpin_cres" || c === "hairpin_dim") &&
+			!rd.userHairpins?.claimed.has(s.i)
 		) {
 			dirs.push([
 				s.box[0],
 				"wedge",
 				c === "hairpin_cres" ? "crescendo" : "diminuendo",
 				s.cy > st.mid,
+				s.i, // this app: the hairpin's symbol, to name it (see direction)
 			]);
 			dirs.push([s.box[2], "wedge", "stop", s.cy > st.mid]);
 		} else if (c in ARTIC || c in TECH || c in ORNAMENT || c === "fermata") {
@@ -1648,8 +1650,12 @@ function pageMeter(rd, build) {
 }
 
 // ------------------------------------------------------------------ writing
-function direction(meas, d, staffNo) {
-	const [, kind, payload, below] = d;
+/**
+ * A direction (`ids`: this app's id prefix, to name a hairpin's start: by
+ * its symbol, "<ids>hp-<index>", or the id it comes with; null: none).
+ */
+function direction(meas, d, staffNo, ids = null) {
+	const [, kind, payload, below, name] = d;
 	if (kind === "clef") {
 		const attrs = meas.sub("attributes");
 		const [sign, line, octc] = CLEF_XML[payload] ?? ["G", 2, 0];
@@ -1672,7 +1678,11 @@ function direction(meas, d, staffNo) {
 	if (kind === "dyn") {
 		dt.sub("dynamics").sub(payload);
 	} else if (kind === "wedge") {
-		dt.sub("wedge", null, { type: payload });
+		const id =
+			ids === null || name === undefined
+				? {}
+				: { id: typeof name === "number" ? `${ids}hp-${name}` : name };
+		dt.sub("wedge", null, { type: payload, ...id });
 	} else if (kind === "octave") {
 		dt.sub("octave-shift", null, { type: payload[0], size: payload[1] });
 	} else if (kind === "pedal") {
@@ -1838,8 +1848,10 @@ export function writeTree(
 		written = null,
 		idPrefix = "",
 		spans = null,
+		hairpins = null,
 	} = {},
 ) {
+	const ids = noteIds ? idPrefix : null; // to name hairpins (see direction)
 	// the ties and slurs written: { ref, kind, from, to (events), curve }
 	const drawn = [];
 	const L = rd.layout;
@@ -2082,6 +2094,28 @@ export function writeTree(
 			}
 		});
 	}
+	// hairpins set by hand: from the start of one note to the start of another
+	(rd.userHairpins?.list ?? []).forEach((h, k) => {
+		const a = eventOf.get(h.from);
+		const z = eventOf.get(h.to);
+		if (!a || !z || a === z) {
+			return;
+		}
+		const at = (e) => [L.staves[L.syms[e.si].staff].system, e.x];
+		const [first, last] = cmpTuple(at(a), at(z)) <= 0 ? [a, z] : [z, a];
+		const sym = h.sym === null ? null : L.syms[h.sym];
+		const below = sym ? sym.cy > L.staves[sym.staff].mid : true;
+		const id = `${idPrefix}hpu-${k}`;
+		const type = h.kind === "cres" ? "crescendo" : "diminuendo";
+		first.pre.push(["wedge", type, below, id]);
+		last.pre.push(["wedge", "stop", below]);
+		hairpins?.push({
+			...h,
+			from: first.si,
+			to: last.si,
+			id: ids === null ? null : id,
+		});
+	});
 	spans?.push(
 		...drawn.map(({ ref, kind, from, to, curve, id }) => ({
 			ref,
@@ -2298,7 +2332,7 @@ export function writeTree(
 								!(e.kind === "note" && e.chord) &&
 								dirs[0][0] <= e.x + 0.5 * sp
 							) {
-								direction(meas, dirs.shift(), multi ? staffNo : null);
+								direction(meas, dirs.shift(), multi ? staffNo : null, ids);
 							}
 							const dur = e.kind === "mrest" ? barEnd : e.dur;
 							if (e.kind === "gap") {
@@ -2315,12 +2349,8 @@ export function writeTree(
 								posQ = posQ.add(dur);
 								continue;
 							}
-							for (const [kind, payload, below] of e.pre) {
-								direction(
-									meas,
-									[e.x, kind, payload, below],
-									multi ? staffNo : null,
-								);
+							for (const d of e.pre) {
+								direction(meas, [e.x, ...d], multi ? staffNo : null, ids);
 							}
 							const ne = note(
 								meas,
@@ -2342,12 +2372,8 @@ export function writeTree(
 											: null,
 								});
 							}
-							for (const [kind, payload, below] of e.post) {
-								direction(
-									meas,
-									[e.x, kind, payload, below],
-									multi ? staffNo : null,
-								);
+							for (const d of e.post) {
+								direction(meas, [e.x, ...d], multi ? staffNo : null, ids);
 							}
 							if (!e.chord) {
 								posQ = posQ.add(dur);
@@ -2367,7 +2393,7 @@ export function writeTree(
 							maxEnd = posQ;
 						}
 						for (const d of dirs) {
-							direction(meas, d, multi ? staffNo : null);
+							direction(meas, d, multi ? staffNo : null, ids);
 						}
 					});
 			});

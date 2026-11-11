@@ -54,7 +54,7 @@ const rect = computed(() => {
 			<rect v-bind="rect" class="mark" :stroke-width="zoom.w / 250" />
 		</svg>
 		<div v-else class="zoom placeholder">
-			Hover or tap a note, tie or slur on the score to see it on the page.
+			Hover or tap a note, tie, slur or hairpin on the score to see it on the page.
 		</div>
 		<svg
 			class="whole"

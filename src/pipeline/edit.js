@@ -10,6 +10,10 @@
 //       its notes' boxes. `ref` names it (see spanRef): one read on the page
 //       ("c:<curve box>", or "t:<note box>" for a tie drawn without a curve
 //       found), or one added ("a:<from box>><to box>")
+//   { type: "hairpin", ref, kind, from, to } a crescendo or diminuendo set
+//       by hand: kind "cres" | "dim", or null (none); from / to, the boxes of
+//       the notes it starts and ends at. `ref`: one read on the page ("h:<its
+//       box>"), or one added ("ha:<from box>><to box>")
 // Symbols are named by their box, which stays the same when the page is read
 // again with added symbols (symbol indices do not). Hand edits always win
 // over the reader's own choices.
@@ -107,6 +111,7 @@ export function applyEdits(reading, ops, staves) {
 	const siByKey = new Map(reading.layout.syms.map((s) => [boxKey(s.box), s.i]));
 	const edited = new Set();
 	const spans = new Map(); // ref → the span set by hand (see write.js)
+	const hairpins = new Map(); // ref → the hairpin set by hand
 	const tokenOf = (key) => {
 		const si = siByKey.get(key);
 		return si === undefined ? null : (tok.get(si) ?? null);
@@ -134,6 +139,9 @@ export function applyEdits(reading, ops, staves) {
 		} else if (op.type === "span") {
 			spans.set(op.ref, op);
 			edited.add(op.ref);
+		} else if (op.type === "hairpin") {
+			hairpins.set(op.ref, op);
+			edited.add(op.ref);
 		}
 	}
 	const userSpans = { claimed: new Set(), noTie: new Set(), list: [] };
@@ -151,8 +159,28 @@ export function applyEdits(reading, ops, staves) {
 			userSpans.list.push({ ref, kind: op.kind, from, to, curve });
 		}
 	}
-	return { reading: { ...reading, tok, userSpans }, edited };
+	// hairpins, as write.js takes them: { claimed (symbols read, set by
+	// hand), list ([{ ref, kind, from, to (notes), sym (the one read, or
+	// null) }]) }
+	const userHairpins = { claimed: new Set(), list: [] };
+	for (const [ref, op] of hairpins) {
+		const at = ref.startsWith("h:") ? siByKey.get(ref.slice(2)) : undefined;
+		if (at !== undefined) {
+			userHairpins.claimed.add(at);
+		}
+		const from = op.from && siByKey.get(boxKey(op.from));
+		const to = op.to && siByKey.get(boxKey(op.to));
+		if (op.kind && from !== undefined && to !== undefined) {
+			userHairpins.list.push({ ref, kind: op.kind, from, to, sym: at ?? null });
+		}
+	}
+	return { reading: { ...reading, tok, userSpans, userHairpins }, edited };
 }
+
+/** The ref of a hairpin added by hand between two notes (their boxes). */
+export const addedHairpinRef = (from, to) => `ha:${boxKey(from)}>${boxKey(to)}`;
+
+const HAIRPIN_KIND = { hairpin_cres: "cres", hairpin_dim: "dim" };
 
 /**
  * The name of a tie or slur as written (see write.js `spans`): set by hand
@@ -179,12 +207,14 @@ export const addedSpanRef = (from, to) => `a:${boxKey(from)}>${boxKey(to)}`;
 export function resultOf(reading, edited = new Set(), page = 0) {
 	const written = new Map();
 	const spans = [];
+	const hairpins = [];
 	const prefix = `p${page}-`;
 	const tree = writeTree(reading, {
 		noteIds: true,
 		written,
 		idPrefix: prefix,
 		spans,
+		hairpins,
 	});
 	const musicXml = xmlDocument(tree);
 	const L = reading.layout;
@@ -258,6 +288,87 @@ export function resultOf(reading, edited = new Set(), page = 0) {
 			edited: edited.has(ref),
 		});
 	}
+	// the hairpins written: read (drawn from x to x: shown from the notes
+	// nearest its ends), or set by hand (from note to note)
+	const noteKey = (si) => `${page}:${boxKey(L.syms[si].box)}`;
+	const notes = L.syms.filter(
+		(s) =>
+			s.staff >= 0 &&
+			reading.tok.get(s.i)?.real.p >= REAL &&
+			family(reading.tok.get(s.i).cls.v) === "note",
+	);
+	// a hairpin's notes: on its staff (else on its system's staves)
+	const nearestNote = (s, x) => {
+		const system = L.staves[s.staff].system;
+		const own = notes.some((n) => n.staff === s.staff);
+		let best = null;
+		for (const n of notes) {
+			if (own ? n.staff !== s.staff : L.staves[n.staff].system !== system) {
+				continue;
+			}
+			const cost = Math.abs(n.cx - x) + 0.5 * Math.abs(n.cy - s.cy);
+			if (best === null || cost < best[0]) {
+				best = [cost, n];
+			}
+		}
+		return best?.[1] ?? null;
+	};
+	const claimed = reading.userHairpins?.claimed ?? new Set();
+	for (const s of L.syms) {
+		const r = reading.tok.get(s.i);
+		const kind = HAIRPIN_KIND[r?.cls.v];
+		const id = `${prefix}hp-${s.i}`;
+		if (
+			!kind ||
+			r.real.p < REAL ||
+			claimed.has(s.i) ||
+			s.staff < 0 ||
+			!musicXml.includes(`id="${id}"`)
+		) {
+			continue;
+		}
+		const a = nearestNote(s, s.box[0]);
+		const z = nearestNote(s, s.box[2]);
+		const ref = `h:${boxKey(s.box)}`;
+		symbols.push({
+			id,
+			key: `${page}:${ref}`,
+			ref,
+			page,
+			family: "hairpin",
+			kind,
+			box: s.box.map(Number),
+			from: a && noteKey(a.i),
+			to: z && noteKey(z.i),
+			edited: false,
+		});
+	}
+	for (const h of hairpins) {
+		if (!h.id || !musicXml.includes(`id="${h.id}"`)) {
+			continue;
+		}
+		const [a, z] = [box(h.from), box(h.to)];
+		symbols.push({
+			id: h.id,
+			key: `${page}:${h.ref}`,
+			ref: h.ref,
+			page,
+			family: "hairpin",
+			kind: h.kind,
+			box:
+				h.sym !== null
+					? box(h.sym)
+					: [
+							Math.min(a[0], z[0]),
+							Math.min(a[1], z[1]),
+							Math.max(a[2], z[2]),
+							Math.max(a[3], z[3]),
+						],
+			from: noteKey(h.from),
+			to: noteKey(h.to),
+			edited: true,
+		});
+	}
 	return {
 		musicXml,
 		tree,
@@ -270,6 +381,7 @@ export function resultOf(reading, edited = new Set(), page = 0) {
 			rests: symbols.filter((s) => s.family === "rest").length,
 			ties: symbols.filter((s) => s.kind === "tie").length,
 			slurs: symbols.filter((s) => s.kind === "slur").length,
+			hairpins: symbols.filter((s) => s.family === "hairpin").length,
 			changed: symbols.filter((s) => s.changed).length,
 			edited: edited.size,
 		},

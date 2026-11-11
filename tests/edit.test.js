@@ -165,6 +165,32 @@ describe("replaying hand edits", () => {
 		]);
 		expect(keys.size).toBe(3);
 	});
+
+	it("passes hairpins set by hand to the writer", () => {
+		const r = reading();
+		r.layout.syms.push({ i: 2, box: [12, 25, 50, 30] }); // a hairpin
+		const [a, z, hairpin] = r.layout.syms.map((s) => s.box);
+		const { reading: edited } = applyEdits(
+			r,
+			[
+				// the one read: switched; one added, then deleted
+				{
+					type: "hairpin",
+					ref: `h:${boxKey(hairpin)}`,
+					kind: "dim",
+					from: a,
+					to: z,
+				},
+				{ type: "hairpin", ref: "ha:x", kind: "cres", from: a, to: z },
+				{ type: "hairpin", ref: "ha:x", kind: null, from: a, to: z },
+			],
+			staves,
+		);
+		expect([...edited.userHairpins.claimed]).toEqual([2]);
+		expect(edited.userHairpins.list).toEqual([
+			{ ref: `h:${boxKey(hairpin)}`, kind: "dim", from: 0, to: 1, sym: 2 },
+		]);
+	});
 });
 
 // On real pages: needs the exported models (npm run fetch:models)
@@ -257,5 +283,34 @@ describe.skipIf(!haveModels)("ties and slurs on a real page", () => {
 		expect([slur.from, slur.to].sort()).toEqual([a.key, z.key].sort());
 		expect(added.musicXml).toContain(`id="${slur.id}"`);
 		expect(box(slur.from)).toBeTruthy();
+		// hairpins: read ones listed by their wedge's id; one added from a
+		// note to one in a later bar, its stop written in that bar
+		for (const h of read.symbols.filter((s) => s.family === "hairpin")) {
+			expect(read.musicXml).toContain(`id="${h.id}"`);
+			expect(["cres", "dim"]).toContain(h.kind);
+		}
+		const bars = (xml, id) => {
+			const at = xml.indexOf(`id="${id}"`);
+			return [at, xml.indexOf("</measure>", at)];
+		};
+		// a note, and one well after it on its staff (in a later bar)
+		const later = (n) =>
+			notes.find((m) => m.staff === n.staff && m.box[0] > n.box[0] + 300);
+		const early = notes.find(later);
+		const late = later(early);
+		const cresc = run([
+			{
+				type: "hairpin",
+				ref: "ha:new",
+				kind: "cres",
+				from: early.box,
+				to: late.box,
+			},
+		]);
+		const h = cresc.symbols.find((s) => s.ref === "ha:new");
+		expect(h).toMatchObject({ kind: "cres", from: early.key, to: late.key });
+		const [start, barEnd] = bars(cresc.musicXml, h.id);
+		const stop = cresc.musicXml.indexOf('<wedge type="stop"', start);
+		expect(stop).toBeGreaterThan(barEnd); // in a later bar
 	}, 120000);
 });
