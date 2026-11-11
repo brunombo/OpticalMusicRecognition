@@ -373,12 +373,7 @@ describe("SoundFont banks", () => {
 			["Flute", 73, 2],
 			["Piano", 0, 1],
 		]);
-		expect(read.instruments).toEqual(
-			bank.instruments.map((i) => ({
-				...i,
-				zones: i.zones.map((z) => ({ gens: z.gens, mods: {} })),
-			})),
-		);
+		expect(read.instruments).toEqual(bank.instruments);
 		expect(read.samples).toEqual(bank.samples);
 		expect([...read.data]).toEqual([...bank.data]);
 		expect(() => parseSf2(new Uint8Array(16))).toThrow();
