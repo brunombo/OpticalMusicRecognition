@@ -1,6 +1,7 @@
 <script setup>
 // The page, flattened and cleaned, as it will be recognized.
 import { useOmrState } from "../useOmr.js";
+import ExportButtons from "./ExportButtons.vue";
 
 const omr = useOmrState();
 </script>
@@ -18,14 +19,6 @@ const omr = useOmrState();
 			{{ omr.page.captureState === "detecting" ? "" : "Flattening…" }}
 		</div>
 		<figcaption>The page as it will be recognized.</figcaption>
-		<div class="row">
-			<button
-				class="secondary"
-				:disabled="!omr.page.pageImage || omr.page.flattening"
-				@click="omr.downloadPage"
-			>
-				Download page
-			</button>
-		</div>
+		<ExportButtons step="pages" label="Export the pages" />
 	</figure>
 </template>

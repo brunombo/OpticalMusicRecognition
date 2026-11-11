@@ -19,7 +19,9 @@
 		"upload:models": "uv run scripts/models/upload_hf.py"
 	},
 	"dependencies": {
+		"jspdf": "^4.2.1",
 		"onnxruntime-web": "^1.22.0",
+		"svg2pdf.js": "^2.9.0",
 		"verovio": "^6.2.0",
 		"vue": "^3.5.0"
 	},

@@ -21,6 +21,7 @@ import { addedDet, boxKey, VALUES } from "../pipeline/place.js";
 import { musicXmlToMidi } from "../render/verovio.js";
 import { buildScore } from "../score.js";
 import AddSymbols from "./AddSymbols.vue";
+import ExportButtons from "./ExportButtons.vue";
 import PageHighlight from "./PageHighlight.vue";
 
 const props = defineProps({
@@ -448,6 +449,7 @@ async function downloadMidi() {
 			<div class="group downloads">
 				<button title="Download MusicXML" @click="downloadMusicXml">⬇ MusicXML</button>
 				<button class="secondary" :disabled="result.summary.notes === 0" title="Download MIDI" @click="downloadMidi">⬇ MIDI</button>
+				<ExportButtons step="score" :music-xml="result.musicXml" />
 			</div>
 		</div>
 		<p class="status-line">

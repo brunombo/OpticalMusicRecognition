@@ -15,11 +15,17 @@ async function getToolkit() {
 	return toolkitPromise;
 }
 
-/** Render a MusicXML string to a list of SVG pages. */
+/**
+ * Render a MusicXML string to a list of SVG pages (`options`: Verovio's, over
+ * the screen's; the toolkit keeps options between calls, so every call sets
+ * them all).
+ */
 export async function renderMusicXml(musicXml, options = {}) {
 	const toolkit = await getToolkit();
 	toolkit.setOptions({
 		scale: 40,
+		pageWidth: 2100,
+		pageHeight: 2970,
 		adjustPageHeight: true,
 		breaks: "auto",
 		...options,

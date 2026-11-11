@@ -17,7 +17,7 @@
 // controls: Stop cancels it, Recognize restarts it, and changing its input
 // stops it.
 import { computed, inject, markRaw, reactive, ref } from "vue";
-import { download } from "./download.js";
+import { canvasOf } from "./export.js";
 import { fullQuad } from "./pipeline/capture/index.js";
 import {
 	detectPageCorners,
@@ -174,16 +174,6 @@ export function useOmr() {
 		currentIndex.value = i;
 	}
 
-	const toCanvas = (img) => {
-		const canvas = document.createElement("canvas");
-		canvas.width = img.width;
-		canvas.height = img.height;
-		canvas
-			.getContext("2d")
-			.putImageData(new ImageData(img.data, img.width, img.height), 0, 0);
-		return canvas;
-	};
-
 	function setPageImage(p, flat) {
 		p.pageImage = flat && markRaw(flat);
 		if (p.pageUrl) {
@@ -191,7 +181,7 @@ export function useOmr() {
 			p.pageUrl = null;
 		}
 		if (flat) {
-			toCanvas(flat).toBlob((blob) => {
+			canvasOf(flat).toBlob((blob) => {
 				if (p.pageImage === flat) {
 					p.pageUrl = URL.createObjectURL(blob);
 				}
@@ -297,13 +287,6 @@ export function useOmr() {
 		onCornersCommit();
 	}
 
-	function downloadPage() {
-		toCanvas(page.value.pageImage).toBlob(
-			(blob) => download(`page-${currentIndex.value + 1}.png`, blob),
-			"image/png",
-		);
-	}
-
 	// ---------------------------------------------------------- recognition
 
 	async function run() {
@@ -385,7 +368,6 @@ export function useOmr() {
 		onCornersCommit,
 		resetCorners,
 		useWholePhoto,
-		downloadPage,
 		run,
 	});
 }
