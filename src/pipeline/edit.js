@@ -5,6 +5,11 @@
 //       "alter" ("key" or -2 … 2), "dots" (0 … 2) or "deleted" (true)
 //   { type: "add", cls, at: [x, y] }     a note or rest the detector missed,
 //       placed at a point of the page (see addedDet)
+//   { type: "span", ref, kind, from, to } a tie or slur (phrase marks are
+//       slurs) set by hand: kind "tie" | "slur", or null (none); from / to,
+//       its notes' boxes. `ref` names it (see spanRef): one read on the page
+//       ("c:<curve box>", or "t:<note box>" for a tie drawn without a curve
+//       found), or one added ("a:<from box>><to box>")
 // Symbols are named by their box, which stays the same when the page is read
 // again with added symbols (symbol indices do not). Hand edits always win
 // over the reader's own choices.
@@ -101,6 +106,7 @@ export function applyEdits(reading, ops, staves) {
 	const tok = structuredClone(reading.tok);
 	const siByKey = new Map(reading.layout.syms.map((s) => [boxKey(s.box), s.i]));
 	const edited = new Set();
+	const spans = new Map(); // ref → the span set by hand (see write.js)
 	const tokenOf = (key) => {
 		const si = siByKey.get(key);
 		return si === undefined ? null : (tok.get(si) ?? null);
@@ -125,10 +131,44 @@ export function applyEdits(reading, ops, staves) {
 				setField(r, op.field, op.value);
 				edited.add(key);
 			}
+		} else if (op.type === "span") {
+			spans.set(op.ref, op);
+			edited.add(op.ref);
 		}
 	}
-	return { reading: { ...reading, tok }, edited };
+	const userSpans = { claimed: new Set(), noTie: new Set(), list: [] };
+	for (const [ref, op] of spans) {
+		const at = siByKey.get(ref.slice(2));
+		if (ref.startsWith("c:") && at !== undefined) {
+			userSpans.claimed.add(at);
+		} else if (ref.startsWith("t:") && at !== undefined) {
+			userSpans.noTie.add(at);
+		}
+		const from = op.from && siByKey.get(boxKey(op.from));
+		const to = op.to && siByKey.get(boxKey(op.to));
+		if (op.kind && from !== undefined && to !== undefined) {
+			const curve = ref.startsWith("c:") ? (at ?? null) : null;
+			userSpans.list.push({ ref, kind: op.kind, from, to, curve });
+		}
+	}
+	return { reading: { ...reading, tok, userSpans }, edited };
 }
+
+/**
+ * The name of a tie or slur as written (see write.js `spans`): set by hand
+ * (its own), else by the curve read for it, else by the note its tie starts.
+ */
+export function spanRef(span, syms) {
+	if (span.ref) {
+		return span.ref;
+	}
+	return span.curve !== null
+		? `c:${boxKey(syms[span.curve].box)}`
+		: `t:${boxKey(syms[span.from].box)}`;
+}
+
+/** The ref of a span added by hand between two notes (their boxes). */
+export const addedSpanRef = (from, to) => `a:${boxKey(from)}>${boxKey(to)}`;
 
 /**
  * MusicXML (and its element tree, to join pages: see join.js), the notes and
@@ -138,10 +178,21 @@ export function applyEdits(reading, ops, staves) {
  */
 export function resultOf(reading, edited = new Set(), page = 0) {
 	const written = new Map();
+	const spans = [];
 	const prefix = `p${page}-`;
-	const tree = writeTree(reading, { noteIds: true, written, idPrefix: prefix });
+	const tree = writeTree(reading, {
+		noteIds: true,
+		written,
+		idPrefix: prefix,
+		spans,
+	});
 	const musicXml = xmlDocument(tree);
 	const L = reading.layout;
+	// where a staff is: its system, and its place in it (0: the top one)
+	const slotOf = L.staves.map(
+		(st, k) =>
+			L.staves.filter((o, j) => j < k && o.system === st.system).length,
+	);
 	const symbols = [];
 	for (const s of L.syms) {
 		const r = reading.tok.get(s.i);
@@ -158,6 +209,9 @@ export function resultOf(reading, edited = new Set(), page = 0) {
 			key: `${page}:${key}`,
 			page,
 			box: s.box.map(Number),
+			staff: s.staff,
+			system: s.staff >= 0 ? L.staves[s.staff].system : -1,
+			slot: s.staff >= 0 ? slotOf[s.staff] : -1,
 			family: fam,
 			cls: r.cls.v,
 			pos: r.pos?.v ?? 0,
@@ -174,6 +228,36 @@ export function resultOf(reading, edited = new Set(), page = 0) {
 				!edited.has(key) && r.cls.det !== undefined && r.cls.det !== r.cls.v,
 		});
 	}
+	// the ties and slurs written: drawn on the score, found on the page (the
+	// curve read, else the span of their notes)
+	const box = (si) => L.syms[si].box.map(Number);
+	for (const span of spans) {
+		if (!span.id || !musicXml.includes(`id="${span.id}"`)) {
+			continue;
+		}
+		const ref = spanRef(span, L.syms);
+		const [a, z] = [box(span.from), box(span.to)];
+		symbols.push({
+			id: span.id,
+			key: `${page}:${ref}`,
+			ref,
+			page,
+			family: "curve",
+			kind: span.kind,
+			box:
+				span.curve !== null
+					? box(span.curve)
+					: [
+							Math.min(a[0], z[0]),
+							Math.min(a[1], z[1]),
+							Math.max(a[2], z[2]),
+							Math.max(a[3], z[3]),
+						],
+			from: `${page}:${boxKey(L.syms[span.from].box)}`,
+			to: `${page}:${boxKey(L.syms[span.to].box)}`,
+			edited: edited.has(ref),
+		});
+	}
 	return {
 		musicXml,
 		tree,
@@ -184,6 +268,8 @@ export function resultOf(reading, edited = new Set(), page = 0) {
 			systems: L.systems.length,
 			notes: symbols.filter((s) => s.family === "note").length,
 			rests: symbols.filter((s) => s.family === "rest").length,
+			ties: symbols.filter((s) => s.kind === "tie").length,
+			slurs: symbols.filter((s) => s.kind === "slur").length,
 			changed: symbols.filter((s) => s.changed).length,
 			edited: edited.size,
 		},

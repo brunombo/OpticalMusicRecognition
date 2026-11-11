@@ -2,8 +2,11 @@
 // The recognized score, editable: a note or rest picked on the score (click,
 // or ← → from one to the next) can have its pitch, value, dots and accidental
 // changed, become a rest / a note, or be deleted; missed notes and rests are
-// added on their page. Edits are a list of operations (see pipeline/edit.js),
-// each on a page, replayed by the recognition worker on its reading of that
+// added on their page. Ties and slurs (phrase marks are slurs) are picked
+// the same way: they can be deleted, moved to the previous / next note at
+// either end, or switch between tie and slur; missed ones are added from a
+// note ("+ Tie", "+ Slur to…"). Edits are a list of operations (see
+// pipeline/edit.js), each on a page, replayed by the recognition worker on its reading of that
 // page, so undo and redo are one operation less or more. Hovering a note
 // shows it on its page. The title and composer are shown above the score.
 import {
@@ -16,6 +19,7 @@ import {
 	watch,
 } from "vue";
 import { download } from "../download.js";
+import { addedSpanRef } from "../pipeline/edit.js";
 import { editRecognition } from "../pipeline/index.js";
 import { addedDet, boxKey, VALUES } from "../pipeline/place.js";
 import { musicXmlToMidi } from "../render/verovio.js";
@@ -64,6 +68,7 @@ const shown = computed(
 	() => byId.value.get(hoveredId.value) ?? selected.value ?? null,
 );
 const isNote = computed(() => selected.value?.family === "note");
+const isCurve = computed(() => selected.value?.family === "curve");
 // the page shown beside the score: the hovered / selected note's (else the
 // last one shown)
 const lastPage = ref(0);
@@ -207,7 +212,9 @@ const toggleRest = () =>
 
 function remove() {
 	const s = selected.value;
-	if (s) {
+	if (s?.family === "curve") {
+		editSpan({ kind: null });
+	} else if (s) {
 		const next = neighbour(1) ?? neighbour(-1);
 		apply(
 			{ type: "set", page: s.page, box: s.box, field: "deleted", value: true },
@@ -216,11 +223,136 @@ function remove() {
 	}
 }
 
+// ------------------------------------------------------- ties and slurs
+
+/** The notes on the same line as note `key` (its staff, system after system). */
+function lineOf(key) {
+	const n = byKey.value.get(key);
+	if (!n) {
+		return [];
+	}
+	return result.value.symbols
+		.filter(
+			(s) => s.family === "note" && s.page === n.page && s.slot === n.slot,
+		)
+		.sort(
+			(a, b) =>
+				a.system - b.system || a.box[0] - b.box[0] || a.box[1] - b.box[1],
+		);
+}
+
+/** The note `step` places after (or before) note `key` on its line, or null. */
+function alongLine(key, step) {
+	const line = lineOf(key);
+	const at = line.findIndex((s) => s.key === key);
+	return at < 0 ? null : (line[at + step] ?? null);
+}
+
+const pitchName = (s) =>
+	s?.pitch
+		? `${s.pitch.step}${ACCIDENTALS[s.pitch.alter] ?? ""}${s.pitch.octave}`
+		: "?";
+const samePitch = (a, b) =>
+	!!a?.pitch &&
+	!!b?.pitch &&
+	a.pitch.step === b.pitch.step &&
+	a.pitch.octave === b.pitch.octave;
+
+/** Set the selected tie or slur's kind and notes (kind null: none). */
+function editSpan(changes) {
+	const s = selected.value;
+	const span = { kind: s.kind, from: s.from, to: s.to, ...changes };
+	const from = byKey.value.get(span.from);
+	const to = byKey.value.get(span.to);
+	apply(
+		{
+			type: "span",
+			page: s.page,
+			ref: s.ref,
+			kind: span.kind,
+			from: from?.box ?? null,
+			to: to?.box ?? null,
+		},
+		span.kind ? s.key : span.from,
+	);
+}
+
+/** Move the selected tie or slur's start or end (`end`) a note along. */
+function moveEnd(end, step) {
+	const next = alongLine(selected.value[end], step);
+	if (next) {
+		editSpan({ [end]: next.key });
+	}
+}
+
+const spanEnds = computed(() => {
+	const s = isCurve.value ? selected.value : null;
+	return s && { from: byKey.value.get(s.from), to: byKey.value.get(s.to) };
+});
+const canTie = computed(
+	() => !!spanEnds.value && samePitch(spanEnds.value.from, spanEnds.value.to),
+);
+const canMove = (end, step) =>
+	!!selected.value && !!alongLine(selected.value[end], step);
+
+/** The ties and slurs starting or ending on the selected note. */
+const noteSpans = computed(() => {
+	const s = isNote.value ? selected.value : null;
+	return s
+		? result.value.symbols.filter(
+				(c) => c.family === "curve" && (c.from === s.key || c.to === s.key),
+			)
+		: [];
+});
+
+/** Add a tie or slur from note `from` to note `to` (symbols). */
+function addSpan(kind, from, to) {
+	const ref = addedSpanRef(from.box, to.box);
+	apply(
+		{ type: "span", page: from.page, ref, kind, from: from.box, to: to.box },
+		`${from.page}:${ref}`,
+	);
+}
+
+// "Slur to…": the next note clicked ends it
+const picking = ref(null); // the note a slur is drawn from, while picking
+const pickHint = ref(null);
+
+function startSlur() {
+	picking.value = selected.value;
+	pickHint.value = null;
+}
+
+function endSlur(to) {
+	const from = picking.value;
+	picking.value = null;
+	if (to.family !== "note" || to.key === from.key) {
+		pickHint.value = "A slur ends on another note.";
+	} else if (to.page !== from.page) {
+		pickHint.value = "A slur starts and ends on the same page.";
+	} else {
+		addSpan("slur", from, to);
+	}
+}
+
+/** The next note of the same pitch on the selected note's line, if any. */
+const tieTarget = computed(() => {
+	const s = isNote.value ? selected.value : null;
+	if (!s || noteSpans.value.some((c) => c.kind === "tie" && c.from === s.key)) {
+		return null;
+	}
+	const line = lineOf(s.key);
+	const at = line.findIndex((n) => n.key === s.key);
+	return line.slice(at + 1, at + 12).find((n) => samePitch(n, s)) ?? null;
+});
+
 const addStaves = computed(
 	() => result.value.pageResults[addPage.value]?.staves ?? [],
 );
 const addSymbols = computed(() =>
-	result.value.symbols.filter((s) => s.page === addPage.value),
+	result.value.symbols.filter(
+		(s) => s.page === addPage.value && s.family !== "curve",
+	),
 );
 
 function add(at) {
@@ -270,10 +402,32 @@ function selectNeighbour(step) {
 }
 
 /**
- * The note or rest nearest a pointer, within a few pixels (Verovio's glyphs
- * are thin, hit-testing them misses), or null.
+ * The note, rest, tie or slur at a pointer: a note or rest it is on, else a
+ * tie or slur it is on (their hit area is widened, see style.css), else the
+ * note or rest within a few pixels; or null.
  */
-function nearest({ clientX: x, clientY: y }) {
+function nearest(event) {
+	const [note, distance] = nearestNote(event);
+	if (note && distance < 1) {
+		return note;
+	}
+	const curve = event.target?.closest?.("g.slur, g.tie");
+	return byId.value.get(curve && curveId(curve)) ?? note;
+}
+
+/**
+ * A tie or slur's id, from any of its parts (one across a line break is
+ * drawn in two: the second classed "id-<its id>").
+ */
+const curveId = (el) =>
+	el.id || (el.getAttribute("class") ?? "").match(/\bid-(\S+)/)?.[1] || null;
+
+/**
+ * The note or rest nearest a pointer, within a few pixels (Verovio's glyphs
+ * are thin, hit-testing them misses), and how far (px): [symbol, distance],
+ * or [null].
+ */
+function nearestNote({ clientX: x, clientY: y }) {
 	let best = null;
 	let bestDistance = 8; // px
 	for (const el of scoreElements()) {
@@ -291,7 +445,7 @@ function nearest({ clientX: x, clientY: y }) {
 			bestDistance = distance;
 		}
 	}
-	return best ? byId.value.get(best.id) : null;
+	return best ? [byId.value.get(best.id), bestDistance] : [null];
 }
 
 function onPointerMove(event) {
@@ -302,7 +456,15 @@ function onPointerMove(event) {
 }
 
 function onScoreClick(event) {
-	selectedKey.value = nearest(event)?.key ?? null;
+	const s = nearest(event);
+	if (picking.value) {
+		if (s) {
+			endSlur(s);
+		}
+		return;
+	}
+	pickHint.value = null;
+	selectedKey.value = s?.key ?? null;
 }
 
 /** Mark the hovered and selected notes on the score (after each render). */
@@ -314,11 +476,23 @@ async function markScore() {
 	for (const el of scoreEl.value.querySelectorAll(".hovered, .selected")) {
 		el.classList.remove("hovered", "selected");
 	}
-	const find = (id) => id && scoreEl.value.querySelector(`#${CSS.escape(id)}`);
-	find(hoveredId.value)?.classList.add("hovered");
-	const el = find(selected.value?.id);
-	el?.classList.add("selected");
-	return el;
+	// a symbol's elements (a tie or slur may have a second part)
+	const find = (id) =>
+		id
+			? [
+					...scoreEl.value.querySelectorAll(
+						`#${CSS.escape(id)}, .id-${CSS.escape(id)}`,
+					),
+				]
+			: [];
+	for (const el of find(hoveredId.value)) {
+		el.classList.add("hovered");
+	}
+	const els = find(selected.value?.id);
+	for (const el of els) {
+		el.classList.add("selected");
+	}
+	return els[0] ?? null;
 }
 
 watch([hoveredId, () => selected.value?.id, result], markScore, {
@@ -360,7 +534,9 @@ function onKey(event) {
 		return;
 	}
 	if (key === "Escape") {
-		if (adding.value) {
+		if (picking.value) {
+			picking.value = null;
+		} else if (adding.value) {
 			adding.value = false;
 		} else {
 			selectedKey.value = null;
@@ -368,6 +544,13 @@ function onKey(event) {
 		return;
 	}
 	if (!selected.value) {
+		return;
+	}
+	if (isCurve.value) {
+		if (key === "Delete" || key === "Backspace") {
+			event.preventDefault();
+			remove();
+		}
 		return;
 	}
 	const actions = {
@@ -408,6 +591,11 @@ function describe(s) {
 }
 
 function describeSymbol(s) {
+	if (s.family === "curve") {
+		const from = byKey.value.get(s.from);
+		const to = byKey.value.get(s.to);
+		return `${s.kind === "tie" ? "Tie" : "Slur"} · ${pitchName(from)} → ${pitchName(to)}`;
+	}
 	const length = `${value(s)}${DOTS[s.dots] ?? ""}`;
 	if (s.family === "rest") {
 		return `${length} rest`;
@@ -421,7 +609,7 @@ function describeSymbol(s) {
 
 const fitHint = computed(() => {
 	const s = selected.value;
-	if (!s) {
+	if (!s || s.family === "curve") {
 		return null;
 	}
 	if (!s.written) {
@@ -502,7 +690,11 @@ async function downloadMidi() {
 				{{ unplaced }} added symbol{{ unplaced > 1 ? "s" : "" }} could not be
 				placed in a bar.
 			</span>
-			<span v-else class="hint">A first draft: click a note to correct it.</span>
+			<span v-else-if="picking" class="status">
+				Click the note the slur ends on (Esc: cancel).
+			</span>
+			<span v-else-if="pickHint" class="error">{{ pickHint }}</span>
+			<span v-else class="hint">A first draft: click a note, tie or slur to correct it.</span>
 		</p>
 		<AddSymbols
 			v-if="adding && pageOf(addPage)?.url"
@@ -537,7 +729,39 @@ async function downloadMidi() {
 						<button class="link" title="Deselect (Esc)" @click="selectedKey = null">✕</button>
 					</div>
 					<p v-if="fitHint" class="hint">{{ fitHint }}</p>
-					<div class="tools">
+					<div v-if="isCurve" class="tools">
+						<div class="group" aria-label="Start">
+							<span class="label">Start</span>
+							<button title="Start on the previous note" :disabled="!canMove('from', -1)" @click="moveEnd('from', -1)">◀</button>
+							<button title="Start on the next note" :disabled="!canMove('from', 1)" @click="moveEnd('from', 1)">▶</button>
+						</div>
+						<div class="group" aria-label="End">
+							<span class="label">End</span>
+							<button title="End on the previous note" :disabled="!canMove('to', -1)" @click="moveEnd('to', -1)">◀</button>
+							<button title="End on the next note" :disabled="!canMove('to', 1)" @click="moveEnd('to', 1)">▶</button>
+						</div>
+						<div class="group" aria-label="Kind">
+							<button
+								:aria-pressed="selected.kind === 'tie'"
+								:disabled="!canTie && selected.kind !== 'tie'"
+								:title="canTie ? 'A tie: one note held on' : 'A tie joins two notes of the same pitch'"
+								@click="editSpan({ kind: 'tie' })"
+							>
+								Tie
+							</button>
+							<button
+								:aria-pressed="selected.kind === 'slur'"
+								title="A slur or phrase mark: notes played smoothly"
+								@click="editSpan({ kind: 'slur' })"
+							>
+								Slur
+							</button>
+						</div>
+						<div class="group">
+							<button class="danger" title="Delete (Del)" @click="remove">Delete</button>
+						</div>
+					</div>
+					<div v-else class="tools">
 						<div v-if="isNote" class="group" aria-label="Pitch">
 							<button title="Higher (↑)" @click="pitch(1)">▲</button>
 							<button title="Lower (↓)" @click="pitch(-1)">▼</button>
@@ -575,8 +799,24 @@ async function downloadMidi() {
 							</button>
 							<button class="danger" title="Delete (Del)" @click="remove">Delete</button>
 						</div>
+						<div v-if="isNote" class="group" aria-label="Ties and slurs">
+							<button
+								v-for="c in noteSpans"
+								:key="c.key"
+								:title="`Select this ${c.kind}`"
+								@click="selectedKey = c.key"
+							>
+								{{ c.kind === "tie" ? "Tie" : "Slur" }} {{ c.from === selected.key ? "→" : "←" }} {{ pitchName(byKey.get(c.from === selected.key ? c.to : c.from)) }}
+							</button>
+							<button v-if="tieTarget" :title="`Tie to the next ${pitchName(tieTarget)}`" @click="addSpan('tie', selected, tieTarget)">
+								+ Tie
+							</button>
+							<button :aria-pressed="!!picking" title="Add a slur or phrase mark: then click the note it ends on" @click="picking ? (picking = null) : startSlur()">
+								+ Slur to…
+							</button>
+						</div>
 					</div>
-					<p class="hint keys">← → previous / next · Esc deselect</p>
+					<p class="hint keys">{{ isCurve ? "Del delete · Esc deselect" : "← → previous / next · Esc deselect" }}</p>
 				</div>
 				<PageHighlight
 					v-if="highlightPage?.url"
@@ -720,6 +960,17 @@ async function downloadMidi() {
 	background: var(--accent);
 	color: var(--accent-ink);
 	border-color: var(--accent);
+}
+
+.tools .label {
+	align-self: center;
+	margin-right: 0.2rem;
+	color: var(--muted);
+	font-size: 0.8rem;
+}
+
+.tools button:disabled {
+	opacity: 0.45;
 }
 
 .tools button.danger {

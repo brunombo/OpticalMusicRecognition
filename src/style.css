@@ -227,6 +227,15 @@ input[type="file"] {
 	cursor: pointer;
 }
 
+/* ties and slurs: easier to point at (a wider, invisible outline; :not(#_)
+   weighs as an id, over the SVG's own style, "#<its id> path") */
+.score-view g.slur path:not(#_),
+.score-view g.tie path:not(#_) {
+	stroke: transparent;
+	stroke-width: 8px;
+	vector-effect: non-scaling-stroke;
+}
+
 .score-view g.hovered {
 	color: #e65028;
 	fill: #e65028;

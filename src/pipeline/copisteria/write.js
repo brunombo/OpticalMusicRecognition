@@ -173,6 +173,7 @@ function event(fields) {
 		alter: 0,
 		tie: false,
 		tieStop: false,
+		tieId: "", // this app: the id of the tie it starts
 		unpitched: false,
 		marks: [],
 		dur: new Fraction(1),
@@ -926,9 +927,21 @@ function voices(evs, sp, singleStaffPart = true, barLen = null, score = null) {
 }
 
 // ------------------------------------------------------------------ ties, beams, slurs
-function drawnTies(rd, pairs) {
+// This app's hand edits (see pipeline/edit.js) come as `rd.userSpans`:
+// { claimed (curve symbol indices: no longer read automatically), noTie
+// (note symbol indices: no automatic tie from them), list ([{ ref, kind:
+// "tie" | "slur", from, to (note symbol indices), curve (index or null) }]) }.
+// Without it, the writing is upstream's.
+const NO_USER_SPANS = { claimed: new Set(), noTie: new Set(), list: [] };
+
+/**
+ * The pairs (tied note, next one of its pitch) whose tie is kept: drawn (a
+ * curve beside them: `curveOf` receives it, pair → curve index) or close.
+ */
+function drawnTies(rd, pairs, curveOf = new Map()) {
 	const L = rd.layout;
 	const sym = L.syms;
+	const user = rd.userSpans ?? NO_USER_SPANS;
 	const curves = sym.filter(
 		(s) => s.staff >= 0 && real(rd, s.i) && clsOf(rd, s.i) === "curve",
 	);
@@ -972,14 +985,28 @@ function drawnTies(rd, pairs) {
 	});
 	const kept = new Set();
 	const used = new Set();
-	for (const [, n, c] of edges.sort(cmpTuple)) {
-		if (!kept.has(n) && !used.has(c)) {
-			kept.add(n);
-			used.add(c);
+	// edited by hand: a tie from a note set apart, or drawn by a curve set
+	// apart (its best curve), is left out
+	const blocked = new Set();
+	pairs.forEach(([e], n) => {
+		if (user.noTie.has(e.si)) {
+			blocked.add(n);
 		}
+	});
+	for (const [, n, c] of edges.sort(cmpTuple)) {
+		if (kept.has(n) || blocked.has(n) || used.has(c)) {
+			continue;
+		}
+		if (user.claimed.has(c)) {
+			blocked.add(n);
+			continue;
+		}
+		kept.add(n);
+		used.add(c);
+		curveOf.set(n, c);
 	}
 	pairs.forEach(([e, f, nxt], n) => {
-		if (kept.has(n) || f === null) {
+		if (kept.has(n) || blocked.has(n) || f === null) {
 			return;
 		}
 		if (e.si < 0 || f.si < 0) {
@@ -1018,7 +1045,26 @@ function nextSystemFirst(L, notesOn, staff, place) {
 	return evs.length ? evs[0] : null;
 }
 
-function attach(rd, built, plans, place) {
+/** The events read from each symbol (the first, when it was copied). */
+function eventsBySymbol(built) {
+	const out = new Map();
+	for (const measures of built) {
+		for (const m of measures) {
+			for (const st of m.staves) {
+				for (const evs of st?.voices.values() ?? []) {
+					for (const e of evs) {
+						if (e.si >= 0 && !e.copied && !out.has(e.si)) {
+							out.set(e.si, e);
+						}
+					}
+				}
+			}
+		}
+	}
+	return out;
+}
+
+function attach(rd, built, plans, place, drawn = []) {
 	const L = rd.layout;
 	const slot = new Map();
 	for (const at of place) {
@@ -1152,13 +1198,48 @@ function attach(rd, built, plans, place) {
 	// slurs
 	const nums = new Map();
 	const order = new Map();
+	const noteOf = new Map(); // symbol index → its note
 	for (const evs of notesOn.values()) {
 		for (const e of evs) {
 			order.set(e, [L.staves[sym[e.si].staff].system, e.x]);
+			noteOf.set(e.si, e);
 		}
 	}
+	const user = rd.userSpans ?? NO_USER_SPANS;
+	/** A slur from `a` to `z` (on staff `staff`), numbered. */
+	const slur = (a, z, staff, byPart = false) => {
+		// upstream numbers a staff's slurs; one set by hand is numbered apart
+		// from all its part's (MusicXML's numbers are the part's)
+		const part = partOf.get(slot.get(staff));
+		const staves = byPart
+			? L.staves
+					.map((_, k) => k)
+					.filter((k) => partOf.get(slot.get(k)) === part)
+			: [staff];
+		const busy = staves
+			.flatMap((k) => nums.get(k) ?? [])
+			.filter(([end]) => cmpTuple(end, order.get(a)) >= 0)
+			.map(([, num]) => num);
+		let num = 1;
+		if (byPart) {
+			num =
+				Array.from({ length: 16 }, (_, x) => x + 1).find(
+					(x) => !busy.includes(x),
+				) ?? 1;
+		} else if (busy.length < 6) {
+			num = [1, 2, 3, 4, 5, 6].find((x) => !busy.includes(x));
+		}
+		if (!nums.has(staff)) {
+			nums.set(staff, []);
+		}
+		nums.get(staff).push([order.get(z), num]);
+		const start = ["start", num];
+		a.slurs.push(start);
+		z.slurs.push(["stop", num]);
+		return start;
+	};
 	const curves = spanners
-		.filter((s) => clsOf(rd, s.i) === "curve")
+		.filter((s) => clsOf(rd, s.i) === "curve" && !user.claimed.has(s.i))
 		.sort((a, b) => cmpTuple([a.staff, a.box[0]], [b.staff, b.box[0]]));
 	for (const c of curves) {
 		const st = L.staves[c.staff];
@@ -1201,19 +1282,22 @@ function attach(rd, built, plans, place) {
 		if (a.tie && a.step === z.step && a.octave === z.octave) {
 			continue;
 		}
-		const busy = (nums.get(c.staff) ?? [])
-			.filter(([end]) => cmpTuple(end, order.get(a)) >= 0)
-			.map(([, num]) => num);
-		let num = 1;
-		if (busy.length < 6) {
-			num = [1, 2, 3, 4, 5, 6].find((x) => !busy.includes(x));
+		const start = slur(a, z, c.staff);
+		drawn.push({ ref: null, kind: "slur", from: a, to: z, curve: c.i, start });
+	}
+	// by hand: between the notes given (any staff of the page)
+	for (const span of user.list) {
+		if (span.kind !== "slur") {
+			continue;
 		}
-		if (!nums.has(c.staff)) {
-			nums.set(c.staff, []);
+		const a = noteOf.get(span.from);
+		const z = noteOf.get(span.to);
+		if (a && z && a !== z) {
+			const [first, last] =
+				cmpTuple(order.get(a), order.get(z)) <= 0 ? [a, z] : [z, a];
+			const start = slur(first, last, L.syms[first.si].staff, true);
+			drawn.push({ ...span, from: first, to: last, start });
 		}
-		nums.get(c.staff).push([order.get(z), num]);
-		a.slurs.push(["start", num]);
-		z.slurs.push(["stop", num]);
 	}
 	for (const s of spanners) {
 		const c = clsOf(rd, s.i);
@@ -1666,10 +1750,12 @@ function note(meas, e, dur, voice, staffNo, wholeRest = false) {
 		nots.push(["tied", { type: "stop" }]);
 	}
 	if (e.tie) {
-		nots.push(["tied", { type: "start" }]);
+		const id = e.tieId && !e.copied ? { id: e.tieId } : {};
+		nots.push(["tied", { type: "start", ...id }]);
 	}
-	for (const [typ, num] of e.slurs) {
-		nots.push(["slur", { type: typ, number: num }]);
+	for (const [typ, num, id] of e.slurs) {
+		const named = id && !e.copied ? { id } : {};
+		nots.push(["slur", { type: typ, number: num, ...named }]);
 	}
 	if (e.tupletMark) {
 		nots.push(["tuplet", { type: e.tupletMark }]);
@@ -1746,8 +1832,16 @@ export const write = (rd, options = {}) => xmlDocument(writeTree(rd, options));
 /** The reading's MusicXML as an element tree (see write). */
 export function writeTree(
 	rd,
-	{ title = null, noteIds = false, written = null, idPrefix = "" } = {},
+	{
+		title = null,
+		noteIds = false,
+		written = null,
+		idPrefix = "",
+		spans = null,
+	} = {},
 ) {
+	// the ties and slurs written: { ref, kind, from, to (events), curve }
+	const drawn = [];
 	const L = rd.layout;
 	const usedIds = new Set();
 	const plans = planParts(rd);
@@ -1942,17 +2036,62 @@ export function writeTree(
 			}
 		}
 	}
-	const kept = drawnTies(rd, pairs);
+	const curveOf = new Map();
+	const kept = drawnTies(rd, pairs, curveOf);
 	pairs.forEach(([e, partner], n) => {
 		if (!kept.has(n)) {
 			e.tie = false;
 		} else {
 			partner.tieStop = true;
 			partner.alter = e.alter;
+			drawn.push({
+				ref: null,
+				kind: "tie",
+				from: e,
+				to: partner,
+				curve: curveOf.get(n) ?? null,
+			});
 		}
 	});
+	const user = rd.userSpans ?? NO_USER_SPANS;
+	const eventOf = eventsBySymbol(built);
+	for (const span of user.list) {
+		const from = eventOf.get(span.from);
+		const to = eventOf.get(span.to);
+		if (
+			span.kind === "tie" &&
+			from?.kind === "note" &&
+			to?.kind === "note" &&
+			from !== to
+		) {
+			from.tie = true;
+			to.tieStop = true;
+			drawn.push({ ...span, from, to });
+		}
+	}
 
-	attach(rd, built, plans, place);
+	attach(rd, built, plans, place, drawn);
+	if (noteIds) {
+		// this app: ids on the ties and slurs started, to find them again
+		drawn.forEach((span, k) => {
+			span.id = `${idPrefix}crv-${k}`;
+			if (span.kind === "tie") {
+				span.from.tieId = span.id;
+			} else {
+				span.start[2] = span.id;
+			}
+		});
+	}
+	spans?.push(
+		...drawn.map(({ ref, kind, from, to, curve, id }) => ({
+			ref,
+			kind,
+			from: from.si,
+			to: to.si,
+			curve,
+			id: id ?? null,
+		})),
+	);
 
 	const barEnds = columnLengths(built);
 	for (const measures of built) {

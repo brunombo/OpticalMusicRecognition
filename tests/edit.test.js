@@ -126,6 +126,45 @@ describe("replaying hand edits", () => {
 		expect(edited.tok.get(1).real.p).toBe(0);
 		expect(edited.tok.get(0).pos.v).toBe(2);
 	});
+
+	it("passes ties and slurs set by hand to the writer, the last one winning", () => {
+		const r = reading();
+		r.layout.syms.push({ i: 2, box: [20, 0, 45, 8] }); // a curve
+		const [a, z, curve] = r.layout.syms.map((s) => s.box);
+		const { reading: edited, edited: keys } = applyEdits(
+			r,
+			[
+				// the curve read: a tie, then a slur
+				{
+					type: "span",
+					ref: `c:${boxKey(curve)}`,
+					kind: "tie",
+					from: a,
+					to: z,
+				},
+				{
+					type: "span",
+					ref: `c:${boxKey(curve)}`,
+					kind: "slur",
+					from: a,
+					to: z,
+				},
+				// a tie drawn without a curve: deleted
+				{ type: "span", ref: `t:${boxKey(a)}`, kind: null, from: a, to: z },
+				// one added, then deleted
+				{ type: "span", ref: "a:x", kind: "slur", from: z, to: a },
+				{ type: "span", ref: "a:x", kind: null, from: z, to: a },
+			],
+			staves,
+		);
+		const { claimed, noTie, list } = edited.userSpans;
+		expect([...claimed]).toEqual([2]);
+		expect([...noTie]).toEqual([0]);
+		expect(list).toEqual([
+			{ ref: `c:${boxKey(curve)}`, kind: "slur", from: 0, to: 1, curve: 2 },
+		]);
+		expect(keys.size).toBe(3);
+	});
 });
 
 // On real pages: needs the exported models (npm run fetch:models)
@@ -167,5 +206,56 @@ describe.skipIf(!haveModels)("several pages, one score", () => {
 		expect((joined.match(/new-page="yes"/g) ?? []).length).toBe(parts(joined));
 		expect(joined).toContain('id="p0-sym-');
 		expect(joined).toContain('id="p1-sym-');
+	}, 120000);
+});
+
+describe.skipIf(!haveModels)("ties and slurs on a real page", () => {
+	it("lists them, with their ids on the score, and edits them", async () => {
+		const { loadGrayPng, loadModels } = await import(
+			"../scripts/copisteria-node.mjs"
+		);
+		const { recognizePage } = await import(
+			"../src/pipeline/copisteria/index.js"
+		);
+		const { models, meta } = await loadModels("2m");
+		const png = loadGrayPng("test_images/Rondo-MuzioClementi-1.png");
+		const { reading } = await recognizePage(
+			{ data: png.gray, width: png.width, height: png.height },
+			models,
+			meta,
+		);
+		const read = resultOf(reading);
+		const curves = read.symbols.filter((s) => s.family === "curve");
+		expect(curves.length).toBeGreaterThan(0);
+		for (const c of curves) {
+			expect(read.musicXml).toContain(`id="${c.id}"`);
+			expect(c.key).toBe(`0:${c.ref}`);
+		}
+		const box = (key) => read.symbols.find((s) => s.key === key).box;
+		const run = (ops) => {
+			const { reading: r, edited } = applyEdits(reading, ops, read.staves);
+			return resultOf(r, edited);
+		};
+		// deleted: one fewer, and not listed
+		const [first] = curves;
+		const gone = run([
+			{ type: "span", ref: first.ref, kind: null, from: null, to: null },
+		]);
+		expect(gone.symbols.filter((s) => s.family === "curve")).toHaveLength(
+			curves.length - 1,
+		);
+		expect(gone.symbols.some((s) => s.ref === first.ref)).toBe(false);
+		// added: a slur between two notes, numbered apart in its part
+		const notes = read.symbols.filter((s) => s.family === "note");
+		const [a, z] = [notes[0], notes[3]];
+		const added = run([
+			{ type: "span", ref: "a:new", kind: "slur", from: a.box, to: z.box },
+		]);
+		const slur = added.symbols.find((s) => s.ref === "a:new");
+		// between them, in score order
+		expect(slur.kind).toBe("slur");
+		expect([slur.from, slur.to].sort()).toEqual([a.key, z.key].sort());
+		expect(added.musicXml).toContain(`id="${slur.id}"`);
+		expect(box(slur.from)).toBeTruthy();
 	}, 120000);
 });
