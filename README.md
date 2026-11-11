@@ -7,6 +7,37 @@ no image ever leaves the device.
 See [`LITERATURE_REVIEW.md`](LITERATURE_REVIEW.md) for the research behind the
 design (§6–7 for the November 2026 update and the current plan).
 
+## This fork: from sheet music to MIDI to audio
+
+This is a fork of
+[pauldubois98/OpticalMusicRecognition](https://github.com/pauldubois98/OpticalMusicRecognition)
+(MusicOCR). It builds on the recognizer to reach the application specified in
+[`docs/SPECIFICATION.md`](docs/SPECIFICATION.md) (in French): photograph a
+score, get a MIDI file with a track per staff, then render it as audio with an
+instrument chosen for each staff. The test plan that will settle the open
+measurements is in [`docs/BANC-D-ESSAI.md`](docs/BANC-D-ESSAI.md). Both
+documents are the specification as exported on 11 November 2026; this table is
+where the code stands against it.
+
+| Specification | Status |
+|---------------|--------|
+| Capture, page clean-up, several pages (F1–F5) | From MusicOCR; PDF and HEIC import not done |
+| Recognition (F6–F10) | From MusicOCR (copista-2m, copista-28m); no confidence per bar yet |
+| Correction (F11–F14) | From MusicOCR |
+| Play the selected bar (F15) | Not done |
+| MIDI type 1, a track and a program per staff; MusicXML; repeats (F16–F18) | Done (`src/audio/`) |
+| Instrument per staff, preview, default by range, mixer, range warning, tempo, reverb, transposition (F19–F24) | Done |
+| WAV export, mix or a file per staff (F25) | Done; MP3 not done |
+| Instrument presets (F26) | Done (kept in the browser) |
+| Projects, sharing (F27–F28) | Not done |
+| Offline use as an installable app, French interface | Not done (the audio panel alone is in French) |
+
+What has been checked: the unit tests (`tests/audio.test.js`), the pitch of
+each of the 18 instruments by measurement, and the audio worker in headless
+Chrome. What has not: the audio panel in a browser on a real device (Safari
+and Android included), and the sound by ear. The test plan's measurements on
+real scores have not been run.
+
 ## Architecture
 
 The recognizer is a JavaScript port of
@@ -91,6 +122,7 @@ models are not committed: the workflow exports them
 (`npm run fetch:models`, cached on the export script's hash, so it only reruns
 when the pinned copisteria commit changes) and ships them in the site's
 `models/` folder. One-time setup: *Settings → Pages → Source: GitHub Actions*.
+`.github/workflows/ci.yml` lints, tests and builds every other branch.
 
 - `BASE_PATH` (set by the workflow to `/<repo>/`) is the site's path.
 - `VITE_MODELS_URL` (optional, at build time) loads the models from another
@@ -118,4 +150,6 @@ rhythm F1 (inter-onset intervals) and an OMR-NED-style edit distance.
 ## Licenses
 
 App: MIT. copisteria code and copista weights: Apache-2.0 (see `NOTICE` and
-`LICENSES/`). Verovio: LGPL-3.0. ONNX Runtime Web: MIT.
+`LICENSES/`). Verovio: LGPL-3.0. ONNX Runtime Web: MIT. Sound bank: cut from
+GeneralUser GS by S. Christian Collins, under its own licence
+(`LICENSES/GeneralUser-GS.txt`).
