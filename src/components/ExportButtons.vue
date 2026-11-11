@@ -8,6 +8,7 @@ const props = defineProps({
 	step: { type: String, required: true }, // "pages" | "score"
 	musicXml: { type: String, default: null }, // for "score"
 	label: { type: String, default: null }, // shown before the buttons
+	arrows: { type: Boolean, default: true }, // "⬇ PNG" (not under a "Download" label)
 });
 const omr = useOmrState();
 
@@ -62,7 +63,7 @@ async function run(format) {
 			:title="what[0]"
 			@click="run('png')"
 		>
-			{{ busy === "png" ? "Exporting…" : "⬇ PNG" }}
+			{{ busy === "png" ? "Exporting…" : `${arrows ? "⬇ " : ""}PNG` }}
 		</button>
 		<button
 			class="secondary"
@@ -70,7 +71,7 @@ async function run(format) {
 			:title="what[1]"
 			@click="run('pdf')"
 		>
-			{{ busy === "pdf" ? "Exporting…" : "⬇ PDF" }}
+			{{ busy === "pdf" ? "Exporting…" : `${arrows ? "⬇ " : ""}PDF` }}
 		</button>
 		<span v-if="error" class="error">{{ error }}</span>
 	</div>

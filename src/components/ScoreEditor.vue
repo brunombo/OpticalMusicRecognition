@@ -890,23 +890,26 @@ async function downloadMidi() {
 				<template v-if="pages.length > 1">{{ pages.length }} pages · </template>
 				{{ result.summary.notes }} notes, {{ result.summary.rests }} rests<template v-if="result.summary.edited"> · {{ result.summary.edited }} edited</template>
 			</span>
-			<div class="group">
-				<button class="secondary" :disabled="!ops.length" title="Undo (Ctrl+Z)" @click="undo">↶ Undo</button>
-				<button class="secondary" :disabled="!undone.length" title="Redo (Ctrl+Shift+Z)" @click="redo">↷ Redo</button>
-				<button class="secondary" :disabled="!ops.length" title="Undo all edits" @click="resetEdits">Undo all</button>
+			<div class="section" aria-label="Edit">
+				<div class="group">
+					<button class="secondary" :disabled="!ops.length" title="Undo (Ctrl+Z)" @click="undo">↶ Undo</button>
+					<button class="secondary" :disabled="!undone.length" title="Redo (Ctrl+Shift+Z)" @click="redo">↷ Redo</button>
+					<button class="secondary" :disabled="!ops.length" title="Undo all edits" @click="resetEdits">Undo all</button>
+				</div>
+				<button
+					class="secondary"
+					:aria-pressed="adding"
+					:disabled="!canAdd"
+					@click="toggleAdding"
+				>
+					{{ adding ? "Stop adding" : "+ Add missed notes" }}
+				</button>
 			</div>
-			<button
-				class="secondary"
-				:aria-pressed="adding"
-				:disabled="!canAdd"
-				@click="toggleAdding"
-			>
-				{{ adding ? "Stop adding" : "+ Add missed notes" }}
-			</button>
-			<div class="group downloads">
-				<button title="Download MusicXML" @click="downloadMusicXml">⬇ MusicXML</button>
-				<button class="secondary" :disabled="result.summary.notes === 0" title="Download MIDI" @click="downloadMidi">⬇ MIDI</button>
-				<ExportButtons step="score" :music-xml="result.musicXml" />
+			<div class="section" aria-label="Download">
+				<span class="label">Download</span>
+				<button title="Download MusicXML" @click="downloadMusicXml">MusicXML</button>
+				<button class="secondary" :disabled="result.summary.notes === 0" title="Download MIDI" @click="downloadMidi">MIDI</button>
+				<ExportButtons step="score" :music-xml="result.musicXml" :arrows="false" />
 			</div>
 		</div>
 		<p class="status-line">
@@ -961,8 +964,9 @@ async function downloadMidi() {
 						<button class="link" title="Deselect (Esc)" @click="selectedKey = null">✕</button>
 					</div>
 					<p v-if="fitHint" class="hint">{{ fitHint }}</p>
-					<div v-if="isDynamic" class="tools">
-						<div class="group" aria-label="Dynamic">
+					<div v-if="isDynamic" class="rows">
+						<span class="label">Value</span>
+						<div class="group" aria-label="Value">
 							<button
 								v-for="v in DYNAMIC_CHOICES"
 								:key="v"
@@ -974,26 +978,14 @@ async function downloadMidi() {
 								{{ v }}
 							</button>
 						</div>
+						<span class="label">Note</span>
 						<div class="group" aria-label="Note">
-							<span class="label">Note</span>
 							<button title="At the previous note" :disabled="!canMove('at', -1)" @click="moveDynamic(-1)">◀</button>
 							<button title="At the next note" :disabled="!canMove('at', 1)" @click="moveDynamic(1)">▶</button>
 						</div>
-						<div class="group">
-							<button class="danger" title="Delete (Del)" @click="remove">Delete</button>
-						</div>
 					</div>
-					<div v-else-if="isSpan" class="tools">
-						<div class="group" aria-label="Start">
-							<span class="label">Start</span>
-							<button title="Start on the previous note" :disabled="!canMove('from', -1)" @click="moveEnd('from', -1)">◀</button>
-							<button title="Start on the next note" :disabled="!canMove('from', 1)" @click="moveEnd('from', 1)">▶</button>
-						</div>
-						<div class="group" aria-label="End">
-							<span class="label">End</span>
-							<button title="End on the previous note" :disabled="!canMove('to', -1)" @click="moveEnd('to', -1)">◀</button>
-							<button title="End on the next note" :disabled="!canMove('to', 1)" @click="moveEnd('to', 1)">▶</button>
-						</div>
+					<div v-else-if="isSpan" class="rows">
+						<span class="label">Kind</span>
 						<div v-if="isHairpin" class="group" aria-label="Kind">
 							<button
 								v-for="k in ['cres', 'dim']"
@@ -1022,16 +1014,37 @@ async function downloadMidi() {
 								Slur
 							</button>
 						</div>
-						<div class="group">
-							<button class="danger" title="Delete (Del)" @click="remove">Delete</button>
+						<span class="label">Start</span>
+						<div class="group" aria-label="Start">
+							<button title="Start on the previous note" :disabled="!canMove('from', -1)" @click="moveEnd('from', -1)">◀</button>
+							<button title="Start on the next note" :disabled="!canMove('from', 1)" @click="moveEnd('from', 1)">▶</button>
+						</div>
+						<span class="label">End</span>
+						<div class="group" aria-label="End">
+							<button title="End on the previous note" :disabled="!canMove('to', -1)" @click="moveEnd('to', -1)">◀</button>
+							<button title="End on the next note" :disabled="!canMove('to', 1)" @click="moveEnd('to', 1)">▶</button>
 						</div>
 					</div>
-					<div v-else class="tools">
-						<div v-if="isNote" class="group" aria-label="Pitch">
-							<button title="Higher (↑)" @click="pitch(1)">▲</button>
-							<button title="Lower (↓)" @click="pitch(-1)">▼</button>
-						</div>
-						<div class="group" aria-label="Value">
+					<div v-else class="rows">
+						<template v-if="isNote">
+							<span class="label">Pitch</span>
+							<div class="group" aria-label="Pitch">
+								<button title="Higher (↑)" @click="pitch(1)">▲</button>
+								<button title="Lower (↓)" @click="pitch(-1)">▼</button>
+								<span class="gap"></span>
+								<button
+									v-for="[a, text, title] in ALTER_CHOICES"
+									:key="a"
+									:aria-pressed="selected.alter === a"
+									:title="title"
+									@click="setAlter(a)"
+								>
+									{{ text }}
+								</button>
+							</div>
+						</template>
+						<span class="label">Duration</span>
+						<div class="group" aria-label="Duration">
 							<button
 								v-for="(v, i) in VALUES"
 								:key="v"
@@ -1041,23 +1054,12 @@ async function downloadMidi() {
 							>
 								{{ v === "eighth" ? "8th" : v }}
 							</button>
-						</div>
-						<div class="group">
+							<span class="gap"></span>
 							<button :aria-pressed="selected.dots > 0" title="Dots: none, one, two (.)" @click="cycleDots">
 								{{ selected.dots === 2 ? "··" : "·" }} dot
 							</button>
 						</div>
-						<div v-if="isNote" class="group" aria-label="Accidental">
-							<button
-								v-for="[a, text, title] in ALTER_CHOICES"
-								:key="a"
-								:aria-pressed="selected.alter === a"
-								:title="title"
-								@click="setAlter(a)"
-							>
-								{{ text }}
-							</button>
-						</div>
+						<span class="label">Tuplet</span>
 						<div class="group" aria-label="Tuplet">
 							<button
 								v-for="[t, text, title] in TUP_CHOICES"
@@ -1070,67 +1072,72 @@ async function downloadMidi() {
 								{{ text }}
 							</button>
 						</div>
-						<div v-if="isNote" class="group" aria-label="Articulation">
-							<button
-								v-for="[c, text, title] in ARTIC_CHOICES"
-								:key="c"
-								class="artic"
-								:aria-pressed="!!selected.artic?.includes(c)"
-								:disabled="!selected.written"
-								:title="title"
-								@click="toggleArtic(c)"
-							>
-								{{ text }}
-							</button>
-						</div>
-						<div class="group">
-							<button title="Rest ↔ note (r)" @click="toggleRest">
-								{{ isNote ? "To rest" : "To note" }}
-							</button>
-							<button class="danger" title="Delete (Del)" @click="remove">Delete</button>
-						</div>
-						<div v-if="isNote" class="group" aria-label="Dynamic">
-							<button
-								v-for="v in DYNAMIC_CHOICES"
-								:key="v"
-								class="dyn"
-								:aria-pressed="noteDynamic?.value === v"
-								:disabled="!selected.written"
-								:title="noteDynamic?.value === v ? `Remove the ${DYNAMIC_NAMES[v]}` : `${DYNAMIC_NAMES[v]} at this note`"
-								@click="setDynamic(v)"
-							>
-								{{ v }}
-							</button>
-							<button
-								v-if="noteDynamic"
-								:title="`Select this dynamic (to move it)`"
-								@click="selectedKey = noteDynamic.key"
-							>
-								Select {{ noteDynamic.value }}
-							</button>
-						</div>
-						<div v-if="isNote" class="group" aria-label="Ties, slurs and hairpins">
-							<button
-								v-for="c in noteSpans"
-								:key="c.key"
-								:title="`Select this ${KIND_NAMES[c.kind].toLowerCase()}`"
-								@click="selectedKey = c.key"
-							>
-								{{ KIND_NAMES[c.kind] }} {{ c.from === selected.key ? "→" : "←" }} {{ pitchName(byKey.get(c.from === selected.key ? c.to : c.from)) }}
-							</button>
-							<button v-if="tieTarget" :title="`Tie to the next ${pitchName(tieTarget)}`" @click="addSpan('tie', selected, tieTarget)">
-								+ Tie
-							</button>
-							<button
-								v-for="[kind, text, title] in PICKS"
-								:key="kind"
-								:aria-pressed="picking?.kind === kind"
-								:title="title"
-								@click="picking?.kind === kind ? (picking = null) : startPick(kind)"
-							>
-								{{ text }}
-							</button>
-						</div>
+						<template v-if="isNote">
+							<span class="label">Marks</span>
+							<div class="group" aria-label="Marks">
+								<button
+									v-for="[c, text, title] in ARTIC_CHOICES"
+									:key="c"
+									class="artic"
+									:aria-pressed="!!selected.artic?.includes(c)"
+									:disabled="!selected.written"
+									:title="title"
+									@click="toggleArtic(c)"
+								>
+									{{ text }}
+								</button>
+							</div>
+							<span class="label">Dynamic</span>
+							<div class="group" aria-label="Dynamic">
+								<button
+									v-for="v in DYNAMIC_CHOICES"
+									:key="v"
+									class="dyn"
+									:aria-pressed="noteDynamic?.value === v"
+									:disabled="!selected.written"
+									:title="noteDynamic?.value === v ? `Remove the ${DYNAMIC_NAMES[v]}` : `${DYNAMIC_NAMES[v]} at this note`"
+									@click="setDynamic(v)"
+								>
+									{{ v }}
+								</button>
+								<button
+									v-if="noteDynamic"
+									:title="`Select this dynamic (to move it)`"
+									@click="selectedKey = noteDynamic.key"
+								>
+									Select {{ noteDynamic.value }}
+								</button>
+							</div>
+							<span class="label">Lines</span>
+							<div class="group" aria-label="Ties, slurs and hairpins">
+								<button
+									v-for="c in noteSpans"
+									:key="c.key"
+									:title="`Select this ${KIND_NAMES[c.kind].toLowerCase()}`"
+									@click="selectedKey = c.key"
+								>
+									{{ KIND_NAMES[c.kind] }} {{ c.from === selected.key ? "→" : "←" }} {{ pitchName(byKey.get(c.from === selected.key ? c.to : c.from)) }}
+								</button>
+								<button v-if="tieTarget" :title="`Tie to the next ${pitchName(tieTarget)}`" @click="addSpan('tie', selected, tieTarget)">
+									+ Tie
+								</button>
+								<button
+									v-for="[kind, text, title] in PICKS"
+									:key="kind"
+									:aria-pressed="picking?.kind === kind"
+									:title="title"
+									@click="picking?.kind === kind ? (picking = null) : startPick(kind)"
+								>
+									{{ text }}
+								</button>
+							</div>
+						</template>
+					</div>
+					<div class="actions">
+						<button v-if="!isSpan && !isDynamic" title="Rest ↔ note (r)" @click="toggleRest">
+							{{ isNote ? "To rest" : "To note" }}
+						</button>
+						<button class="danger" title="Delete (Del)" @click="remove">Delete</button>
 					</div>
 					<p class="hint keys">{{ isSpan || isDynamic ? "Del delete · Esc deselect" : "← → previous / next · Esc deselect" }}</p>
 				</div>
@@ -1188,9 +1195,27 @@ async function downloadMidi() {
 	margin-right: auto;
 }
 
-.toolbar .group {
+.toolbar .group,
+.toolbar .section {
 	display: flex;
+	flex-wrap: wrap;
 	gap: 0.3rem;
+	align-items: center;
+}
+
+.toolbar .section {
+	gap: 0.3rem 0.6rem;
+	padding-left: 0.75rem;
+	border-left: 1px solid var(--border);
+}
+
+.toolbar .section .label {
+	color: var(--muted);
+	font-size: 0.85rem;
+}
+
+.toolbar .section .group + button {
+	margin-left: 0.15rem;
 }
 
 .toolbar button {
@@ -1244,6 +1269,8 @@ async function downloadMidi() {
 	justify-content: space-between;
 	align-items: baseline;
 	gap: 0.5rem;
+	padding-bottom: 0.4rem;
+	border-bottom: 1px solid var(--border);
 }
 
 .note-editor .hint {
@@ -1251,20 +1278,40 @@ async function downloadMidi() {
 	font-size: 0.8rem;
 }
 
-.tools {
-	display: flex;
-	flex-wrap: wrap;
-	gap: 0.4rem;
-	margin-top: 0.5rem;
+/* a label, then its buttons (which wrap in their own column) */
+.rows {
+	display: grid;
+	grid-template-columns: max-content 1fr;
+	gap: 0.4rem 0.6rem;
+	align-items: center;
+	margin-top: 0.6rem;
 }
 
 .group {
 	display: flex;
 	flex-wrap: wrap;
 	gap: 2px;
+	align-items: center;
 }
 
-.tools button {
+.group .gap {
+	width: 0.5rem;
+}
+
+.actions {
+	display: flex;
+	gap: 0.4rem;
+	margin-top: 0.6rem;
+	padding-top: 0.5rem;
+	border-top: 1px solid var(--border);
+}
+
+.actions .danger {
+	margin-left: auto;
+}
+
+.rows button,
+.actions button {
 	padding: 0.25rem 0.5rem;
 	font-size: 0.85rem;
 	background: var(--bg);
@@ -1272,36 +1319,34 @@ async function downloadMidi() {
 	border: 1px solid var(--border);
 }
 
-.tools button[aria-pressed="true"] {
+.rows button[aria-pressed="true"] {
 	background: var(--accent);
 	color: var(--accent-ink);
 	border-color: var(--accent);
 }
 
-.tools .label {
-	align-self: center;
-	margin-right: 0.2rem;
+.rows .label {
 	color: var(--muted);
 	font-size: 0.8rem;
 }
 
-.tools button.artic {
+.rows button.artic {
 	min-width: 1.9rem;
 	font-weight: 700;
 }
 
-.tools button.dyn {
+.rows button.dyn {
 	min-width: 1.9rem;
 	font-family: "Times New Roman", Times, serif;
 	font-style: italic;
 	font-weight: 700;
 }
 
-.tools button:disabled {
+.rows button:disabled {
 	opacity: 0.45;
 }
 
-.tools button.danger {
+.actions button.danger {
 	color: #b3372f;
 }
 
