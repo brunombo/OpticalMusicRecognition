@@ -16,6 +16,22 @@ async function getToolkit() {
 }
 
 /**
+ * The title printed large: Verovio ignores the MusicXML credit's font size,
+ * not MEI's, so the score goes through MEI with the size set on the first
+ * page's centred header line (the title; the note ids are kept).
+ */
+function bigTitle(toolkit) {
+	const mei = toolkit.getMEI();
+	const sized = mei.replace(
+		/(<pgHead\b[^>]*>[\s\S]*?<rend\b[^>]*?halign="center")/,
+		'$1 fontsize="xx-large"',
+	);
+	if (sized !== mei && !toolkit.loadData(sized)) {
+		throw new Error("Verovio could not read the score back");
+	}
+}
+
+/**
  * Render a MusicXML string to a list of SVG pages (`options`: Verovio's, over
  * the screen's; the toolkit keeps options between calls, so every call sets
  * them all).
@@ -28,14 +44,25 @@ export async function renderMusicXml(musicXml, options = {}) {
 		pageHeight: 2970,
 		adjustPageHeight: true,
 		breaks: "auto",
+		pageMarginTop: 150, // room above the title (default 50)
+		bottomMarginHeader: 12, // and below it, in staff spaces (default 2)
+		footer: "none", // not Verovio's credit line
 		...options,
 	});
 	if (!toolkit.loadData(musicXml)) {
 		throw new Error("Verovio could not parse the MusicXML");
 	}
+	if (musicXml.includes("<credit-type>title</credit-type>")) {
+		bigTitle(toolkit);
+	}
 	const pages = [];
 	for (let page = 1; page <= toolkit.getPageCount(); page++) {
-		pages.push(toolkit.renderToSVG(page));
+		// without Verovio's credit (an SVG <desc>; no option drops it)
+		pages.push(
+			toolkit
+				.renderToSVG(page)
+				.replace(/<desc>Engraved by Verovio[^<]*<\/desc>\s*/, ""),
+		);
 	}
 	return pages;
 }

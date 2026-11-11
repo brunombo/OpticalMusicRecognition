@@ -5,7 +5,7 @@
 // added on their page. Edits are a list of operations (see pipeline/edit.js),
 // each on a page, replayed by the recognition worker on its reading of that
 // page, so undo and redo are one operation less or more. Hovering a note
-// shows it on its page.
+// shows it on its page. The title and composer are shown above the score.
 import {
 	computed,
 	nextTick,
@@ -20,6 +20,7 @@ import { editRecognition } from "../pipeline/index.js";
 import { addedDet, boxKey, VALUES } from "../pipeline/place.js";
 import { musicXmlToMidi } from "../render/verovio.js";
 import { buildScore } from "../score.js";
+import { useOmrState } from "../useOmr.js";
 import AddSymbols from "./AddSymbols.vue";
 import ExportButtons from "./ExportButtons.vue";
 import PageHighlight from "./PageHighlight.vue";
@@ -31,6 +32,9 @@ const props = defineProps({
 	pages: { type: Array, required: true },
 	active: { type: Boolean, default: true }, // shown (keys act on it)
 });
+
+const omr = useOmrState();
+const credits = () => ({ title: omr.title, composer: omr.composer });
 
 const result = shallowRef(props.initial);
 const ops = shallowRef([]);
@@ -105,7 +109,7 @@ async function replay(pages, select = null) {
 		if (run !== editRun || musicXml === null) {
 			return; // a later edit supersedes this one
 		}
-		const score = await buildScore(latest, musicXml);
+		const score = await buildScore(latest, musicXml, credits());
 		if (run !== editRun) {
 			return;
 		}
@@ -123,9 +127,36 @@ async function replay(pages, select = null) {
 		if (run === editRun) {
 			editing.value = false;
 			editProgress.value = null;
+			if (creditsChanged) {
+				showCredits();
+			}
 		}
 	}
 }
+
+// the title or composer changed: the score again, with them (after the edit
+// in progress, if any)
+let creditsChanged = false;
+async function showCredits() {
+	if (editing.value) {
+		creditsChanged = true;
+		return;
+	}
+	creditsChanged = false;
+	const run = ++editRun;
+	try {
+		const score = await buildScore(latest, result.value.musicXml, credits());
+		if (run === editRun) {
+			result.value = score;
+		}
+	} catch (e) {
+		if (run === editRun) {
+			console.error(e);
+			editError.value = e.message;
+		}
+	}
+}
+watch(() => [omr.title, omr.composer], showCredits);
 
 function apply(op, select = null) {
 	ops.value = [...ops.value, op];
@@ -428,6 +459,16 @@ async function downloadMidi() {
 
 <template>
 	<div class="score-editor">
+		<div class="credits">
+			<label>
+				Title
+				<input v-model.lazy="omr.title" type="text" placeholder="Untitled" />
+			</label>
+			<label>
+				Composer
+				<input v-model.lazy="omr.composer" type="text" placeholder="Unknown" />
+			</label>
+		</div>
 		<div class="toolbar">
 			<span class="summary" :title="`${result.summary.staves} staves in ${result.summary.systems} systems; ${result.summary.changed} corrected from context`">
 				<template v-if="pages.length > 1">{{ pages.length }} pages · </template>
@@ -552,6 +593,33 @@ async function downloadMidi() {
 </template>
 
 <style scoped>
+.credits {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.5rem 1rem;
+	margin-bottom: 0.75rem;
+}
+
+.credits label {
+	display: flex;
+	flex: 1 1 14rem;
+	gap: 0.5rem;
+	align-items: center;
+	color: var(--muted);
+	font-size: 0.9rem;
+}
+
+.credits input {
+	flex: 1;
+	min-width: 0;
+	padding: 0.45rem 0.6rem;
+	background: var(--panel);
+	color: var(--ink);
+	border: 1px solid var(--border);
+	border-radius: 8px;
+	font-size: 0.95rem;
+}
+
 .toolbar {
 	display: flex;
 	flex-wrap: wrap;

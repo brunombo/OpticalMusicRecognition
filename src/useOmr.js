@@ -41,6 +41,9 @@ export function useOmr() {
 	// the recognition (see score.js buildScore), edited in ScoreEditor (a new
 	// one starts it afresh)
 	const result = ref(null);
+	// the score's title and composer (kept from one recognition to the next)
+	const title = ref("");
+	const composer = ref("");
 
 	const evening = ref(100);
 	const lighting = ref(100);
@@ -323,7 +326,10 @@ export function useOmr() {
 				({ musicXml } = read);
 				pageResults.push(read);
 			}
-			const score = await buildScore(pageResults, musicXml);
+			const score = await buildScore(pageResults, musicXml, {
+				title: title.value,
+				composer: composer.value,
+			});
 			if (run !== recognitionRun) {
 				return;
 			}
@@ -348,6 +354,8 @@ export function useOmr() {
 		progress,
 		error,
 		result,
+		title,
+		composer,
 		evening,
 		lighting,
 		cleaning,
