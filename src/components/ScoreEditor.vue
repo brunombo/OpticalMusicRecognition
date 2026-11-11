@@ -61,6 +61,16 @@ const pageOf = (i) => props.pages[i] ?? null;
 const canAdd = computed(() => props.pages.some((p) => p.url));
 
 const hoveredId = ref(null);
+
+// the score's zoom (1: its width fits; else wider, scrolled sideways): larger
+// on a phone, where the fitted notes are too small to tap
+const ZOOMS = [1, 1.25, 1.5, 2, 3];
+const phone = () => window.matchMedia?.("(max-width: 640px)").matches ?? false;
+const zoom = ref(phone() ? 2 : 1);
+const zoomBy = (step) => {
+	const i = ZOOMS.indexOf(zoom.value) + step;
+	zoom.value = ZOOMS[Math.min(Math.max(i, 0), ZOOMS.length - 1)];
+};
 const selectedKey = ref(null); // symbols are named by their page and box
 const scoreEl = ref(null);
 
@@ -528,14 +538,14 @@ function nearest(event) {
  * The hairpin or dynamic whose outline (a few pixels around) a pointer is
  * in, the smallest, or null.
  */
-function nearestMark({ clientX: x, clientY: y }) {
+function nearestMark({ clientX: x, clientY: y, pointerType }) {
 	let best = null;
 	let bestArea = Number.POSITIVE_INFINITY;
 	for (const el of scoreEl.value?.querySelectorAll("g.hairpin, g.dynam") ??
 		[]) {
 		const s = byId.value.get(curveId(el));
 		const r = el.getBoundingClientRect();
-		const m = 4; // px
+		const m = pointerType === "touch" ? 10 : 4; // px
 		const area = r.width * r.height;
 		if (
 			s &&
@@ -565,9 +575,9 @@ const curveId = (el) =>
  * are thin, hit-testing them misses), and how far (px): [symbol, distance],
  * or [null].
  */
-function nearestNote({ clientX: x, clientY: y }) {
+function nearestNote({ clientX: x, clientY: y, pointerType }) {
 	let best = null;
-	let bestDistance = 8; // px
+	let bestDistance = pointerType === "touch" ? 20 : 8; // px (a finger: wider)
 	for (const el of scoreElements()) {
 		const r = el.getBoundingClientRect();
 		const dx = Math.max(r.left - x, 0, x - r.right);
@@ -587,6 +597,9 @@ function nearestNote({ clientX: x, clientY: y }) {
 }
 
 function onPointerMove(event) {
+	if (event.pointerType === "touch") {
+		return; // a finger scrolling, not pointing
+	}
 	const s = nearest(event);
 	if (s) {
 		hoveredId.value = s.id;
@@ -643,6 +656,14 @@ watch(
 		el?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
 	},
 );
+
+// zoomed: the selected symbol kept in view
+watch(zoom, async () => {
+	await nextTick();
+	scoreEl.value
+		?.querySelector(".selected")
+		?.scrollIntoView?.({ block: "nearest", inline: "center" });
+});
 
 // ---------------------------------------------------------------- keyboard
 
@@ -912,25 +933,32 @@ async function downloadMidi() {
 				<ExportButtons step="score" :music-xml="result.musicXml" :arrows="false" />
 			</div>
 		</div>
-		<p class="status-line">
-			<span v-if="editing" class="status">
-				{{ editProgress?.stage === "reading in context" ? "Reading the page again…" : "Updating…" }}
-			</span>
-			<span v-else-if="editError" class="error">{{ editError }}</span>
-			<span v-else-if="unplaced" class="status">
-				{{ unplaced }} added symbol{{ unplaced > 1 ? "s" : "" }} could not be
-				placed in a bar.
-			</span>
-			<span v-else-if="picking" class="status">
-				Click the note the {{ KIND_NAMES[picking.kind].toLowerCase() }} ends on
-				(Esc: cancel).
-			</span>
-			<span v-else-if="pickHint" class="error">{{ pickHint }}</span>
-			<span v-else class="hint">
-				A first draft: click a note, tie, slur, hairpin or dynamic to correct
-				it.
-			</span>
-		</p>
+		<div class="status-row">
+			<p class="status-line">
+				<span v-if="editing" class="status">
+					{{ editProgress?.stage === "reading in context" ? "Reading the page again…" : "Updating…" }}
+				</span>
+				<span v-else-if="editError" class="error">{{ editError }}</span>
+				<span v-else-if="unplaced" class="status">
+					{{ unplaced }} added symbol{{ unplaced > 1 ? "s" : "" }} could not be
+					placed in a bar.
+				</span>
+				<span v-else-if="picking" class="status">
+					Click the note the {{ KIND_NAMES[picking.kind].toLowerCase() }} ends on
+					(Esc: cancel).
+				</span>
+				<span v-else-if="pickHint" class="error">{{ pickHint }}</span>
+				<span v-else class="hint">
+					A first draft: click a note, tie, slur, hairpin or dynamic to correct
+					it.
+				</span>
+			</p>
+			<div v-if="result.svg.length > 0" class="group zoom" aria-label="Zoom">
+				<button class="secondary" title="Zoom out" :disabled="zoom === ZOOMS[0]" @click="zoomBy(-1)">−</button>
+				<button class="secondary" title="Fit the width" :aria-pressed="zoom === 1" @click="zoom = 1">{{ zoom === 1 ? "Fit" : `${Math.round(zoom * 100)}%` }}</button>
+				<button class="secondary" title="Zoom in" :disabled="zoom === ZOOMS.at(-1)" @click="zoomBy(1)">+</button>
+			</div>
+		</div>
 		<AddSymbols
 			v-if="adding && pageOf(addPage)?.url"
 			v-model:cls="addCls"
@@ -955,9 +983,12 @@ async function downloadMidi() {
 			>
 				<!-- SVG produced locally by Verovio from our own MusicXML -->
 				<!-- eslint-disable-next-line vue/no-v-html -->
-				<div v-for="(svg, i) in result.svg" :key="i" v-html="svg"></div>
+				<div class="score-pages" :style="{ width: `${zoom * 100}%` }">
+					<div v-for="(svg, i) in result.svg" :key="i" v-html="svg"></div>
+				</div>
 			</div>
-			<div class="side">
+			<!-- beside the score; on a phone, a sheet at the bottom while a symbol is selected -->
+			<div class="side" :class="{ open: !!selected }">
 				<div v-if="selected" class="note-editor">
 					<div class="note-title">
 						<strong>{{ describe(selected) }}</strong>
@@ -1228,10 +1259,34 @@ async function downloadMidi() {
 	color: var(--accent-ink);
 }
 
-.status-line {
+.status-row {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.4rem 0.75rem;
+	align-items: center;
 	margin: 0.4rem 0 0.75rem;
+}
+
+.status-line {
+	flex: 1 1 16rem;
+	margin: 0;
 	font-size: 0.85rem;
 	min-height: 1.2em;
+}
+
+.zoom button {
+	min-width: 2.2rem;
+	padding: 0.25rem 0.5rem;
+	font-size: 0.85rem;
+	font-variant-numeric: tabular-nums;
+}
+
+.zoom button[aria-pressed="true"] {
+	border-color: var(--accent);
+}
+
+.score-pages {
+	min-width: 100%;
 }
 
 .status-line .status {
@@ -1271,6 +1326,44 @@ async function downloadMidi() {
 	gap: 0.5rem;
 	padding-bottom: 0.4rem;
 	border-bottom: 1px solid var(--border);
+}
+
+/* no keyboard on a touch screen, as a rule */
+@media (hover: none) {
+	.note-editor .keys {
+		display: none;
+	}
+}
+
+/* a finger: bigger targets */
+@media (pointer: coarse) {
+	.toolbar button,
+	.rows button,
+	.actions button,
+	.zoom button {
+		min-height: 2.5rem;
+	}
+
+	.rows button {
+		min-width: 2.5rem;
+	}
+}
+
+/* a phone: the toolbar's groups on lines of their own */
+@media (max-width: 640px) {
+	.toolbar .section {
+		padding-left: 0;
+		border-left: none;
+	}
+
+	.toolbar .summary {
+		flex-basis: 100%;
+	}
+
+	.side .note-editor {
+		border: none;
+		padding: 0;
+	}
 }
 
 .note-editor .hint {
