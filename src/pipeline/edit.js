@@ -2,7 +2,9 @@
 // operations, replayed in order on the reading the recognizer made:
 //   { type: "set", box, field, value }   field: "cls" (note_… / rest_…),
 //       "pos" (staff position, half staff spaces up from the middle line),
-//       "alter" ("key" or -2 … 2), "dots" (0 … 2) or "deleted" (true)
+//       "alter" ("key" or -2 … 2), "dots" (0 … 2), "artic" (its
+//       articulations: artic_stacc, artic_ten, …, in place of those read) or
+//       "deleted" (true)
 //   { type: "add", cls, at: [x, y] }     a note or rest the detector missed,
 //       placed at a point of the page (see addedDet)
 //   { type: "span", ref, kind, from, to } a tie or slur (phrase marks are
@@ -92,6 +94,9 @@ function setField(r, field, value) {
 			break;
 		case "dots":
 			r.dots = { ...r.dots, v: value, p: 1 };
+			break;
+		case "artic":
+			r.artic = { v: [...value], user: true };
 			break;
 		case "deleted":
 			r.real = { ...r.real, p: value ? 0 : 1 };
@@ -247,6 +252,8 @@ export function resultOf(reading, edited = new Set(), page = 0) {
 			pos: r.pos?.v ?? 0,
 			dots: r.dots?.v ?? 0,
 			alter: r.alter?.user ? r.alter.v : null, // set by hand
+			// its articulations as written (artic_stacc, …), or null
+			artic: written.get(s.i)?.artic ?? null,
 			// as written (null when not written): the pitch, and the value,
 			// which the writer shortens when it does not fit in the bar
 			pitch: written.get(s.i)?.pitch ?? null,

@@ -312,5 +312,20 @@ describe.skipIf(!haveModels)("ties and slurs on a real page", () => {
 		const [start, barEnd] = bars(cresc.musicXml, h.id);
 		const stop = cresc.musicXml.indexOf('<wedge type="stop"', start);
 		expect(stop).toBeGreaterThan(barEnd); // in a later bar
+		// articulations set by hand replace those read
+		const n = notes.find((x) => x.written);
+		const marked = run([
+			{ type: "set", box: n.box, field: "artic", value: ["artic_ten"] },
+		]);
+		const at = marked.musicXml.indexOf(`id="${n.id}"`);
+		const noteXml = marked.musicXml.slice(
+			at,
+			marked.musicXml.indexOf("</note>", at),
+		);
+		expect(noteXml).toMatch(/<tenuto ?\/>/);
+		expect(noteXml).not.toMatch(/<staccato ?\/>/);
+		expect(marked.symbols.find((x) => x.key === n.key).artic).toEqual([
+			"artic_ten",
+		]);
 	}, 120000);
 });

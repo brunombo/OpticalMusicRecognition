@@ -213,6 +213,21 @@ const pitch = (step) => isNote.value && set("pos", selected.value.pos + step);
 const setValue = (v) => set("cls", `${selected.value.family}_${v}`);
 const cycleDots = () => set("dots", ((selected.value?.dots ?? 0) + 1) % 3);
 const setAlter = (a) => isNote.value && set("alter", a);
+
+/**
+ * Turn an articulation on or off on the selected note (staccato and
+ * staccatissimo exclude each other, as accent and marcato do).
+ */
+function toggleArtic(c) {
+	if (!isNote.value) {
+		return;
+	}
+	const now = selected.value.artic ?? [];
+	const next = now.includes(c)
+		? now.filter((x) => x !== c)
+		: [...now.filter((x) => x !== ARTIC_EXCLUDES[c]), c];
+	set("artic", next);
+}
 const toggleRest = () =>
 	set("cls", `${isNote.value ? "rest" : "note"}_${value(selected.value)}`);
 
@@ -619,6 +634,10 @@ function onKey(event) {
 		n: () => setAlter(0),
 		k: () => setAlter("key"),
 		r: toggleRest,
+		"'": () => toggleArtic("artic_stacc"),
+		"-": () => toggleArtic("artic_ten"),
+		">": () => toggleArtic("artic_acc"),
+		"^": () => toggleArtic("artic_marc"),
 		Delete: remove,
 		Backspace: remove,
 	};
@@ -685,6 +704,21 @@ const PICKS = [
 	["cres", "+ Cresc. to…", "Add a crescendo: then click the note it ends on"],
 	["dim", "+ Dim. to…", "Add a diminuendo: then click the note it ends on"],
 ];
+
+// articulations offered: [class, label, title]
+const ARTIC_CHOICES = [
+	["artic_stacc", "·", "Staccato (')"],
+	["artic_stacciss", "▾", "Staccatissimo"],
+	["artic_ten", "–", "Tenuto (-)"],
+	["artic_acc", ">", "Accent (>)"],
+	["artic_marc", "^", "Marcato (^)"],
+];
+const ARTIC_EXCLUDES = {
+	artic_stacc: "artic_stacciss",
+	artic_stacciss: "artic_stacc",
+	artic_acc: "artic_marc",
+	artic_marc: "artic_acc",
+};
 
 const ALTER_CHOICES = [
 	["key", "Key", "As the key signature (k)"],
@@ -872,6 +906,19 @@ async function downloadMidi() {
 								{{ text }}
 							</button>
 						</div>
+						<div v-if="isNote" class="group" aria-label="Articulation">
+							<button
+								v-for="[c, text, title] in ARTIC_CHOICES"
+								:key="c"
+								class="artic"
+								:aria-pressed="!!selected.artic?.includes(c)"
+								:disabled="!selected.written"
+								:title="title"
+								@click="toggleArtic(c)"
+							>
+								{{ text }}
+							</button>
+						</div>
 						<div class="group">
 							<button title="Rest ↔ note (r)" @click="toggleRest">
 								{{ isNote ? "To rest" : "To note" }}
@@ -1052,6 +1099,11 @@ async function downloadMidi() {
 	margin-right: 0.2rem;
 	color: var(--muted);
 	font-size: 0.8rem;
+}
+
+.tools button.artic {
+	min-width: 1.9rem;
+	font-weight: 700;
 }
 
 .tools button:disabled {

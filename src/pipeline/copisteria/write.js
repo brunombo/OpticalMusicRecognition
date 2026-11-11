@@ -570,6 +570,14 @@ function events(rd, staff, bar, clef, key) {
 		}
 	}
 	dirs = dirs.filter((d) => d[1] !== "mark");
+	// this app: articulations set by hand (see pipeline/edit.js) replace those
+	// read for the note
+	for (const e of evs) {
+		const set = e.kind === "note" ? rd.tok.get(e.si)?.artic : null;
+		if (set?.user) {
+			e.marks = [...e.marks.filter((c) => !(c in ARTIC)), ...set.v];
+		}
+	}
 	return [evs, dirs, marks];
 }
 
@@ -2366,6 +2374,7 @@ export function writeTree(
 								written?.set(e.si, {
 									type: e.typ,
 									dots: e.dots,
+									artic: e.marks.filter((c) => c in ARTIC),
 									pitch:
 										e.kind === "note" && !e.unpitched
 											? { step: e.step, octave: e.octave, alter: e.alter }
