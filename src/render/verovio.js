@@ -31,6 +31,60 @@ function bigTitle(toolkit) {
 	}
 }
 
+/** [its staff (counted across the parts), its id or null] by `<dynamics>`. */
+function xmlDynamics(musicXml) {
+	const found = [];
+	let before = 0; // the staves of the parts before
+	for (const [part] of musicXml.matchAll(/<part\b[^>]*>[\s\S]*?<\/part>/g)) {
+		const staves = Number(part.match(/<staves>(\d+)<\/staves>/)?.[1] ?? 1);
+		for (const [dir] of part.matchAll(/<direction\b[\s\S]*?<\/direction>/g)) {
+			for (const [, attrs] of dir.matchAll(/<dynamics\b([^>]*)>/g)) {
+				const staff = Number(dir.match(/<staff>(\d+)<\/staff>/)?.[1] ?? 1);
+				found.push([
+					before + staff,
+					attrs.match(/\bid="([^"]+)"/)?.[1] ?? null,
+				]);
+			}
+		}
+		before += staves;
+	}
+	return found;
+}
+
+/**
+ * The MusicXML ids of the dynamics, by Verovio's (which drops them): each
+ * staff's dynamics, in order, are Verovio's on that staff, in order (none if
+ * the counts differ).
+ */
+function dynamicIds(toolkit, musicXml) {
+	const byStaff = (list) => {
+		const m = new Map();
+		for (const [staff, id] of list) {
+			m.set(staff, [...(m.get(staff) ?? []), id]);
+		}
+		return m;
+	};
+	const ours = byStaff(xmlDynamics(musicXml));
+	const theirs = byStaff(
+		[...toolkit.getMEI().matchAll(/<dynam\b[^>]*>/g)].map(([tag]) => [
+			Number(tag.match(/\bstaff="(\d+)/)?.[1]),
+			tag.match(/\bxml:id="([^"]+)"/)?.[1],
+		]),
+	);
+	const ids = new Map();
+	for (const [staff, list] of ours) {
+		const vs = theirs.get(staff) ?? [];
+		if (vs.length === list.length) {
+			for (const [k, id] of list.entries()) {
+				if (id) {
+					ids.set(vs[k], id);
+				}
+			}
+		}
+	}
+	return ids;
+}
+
 /**
  * Render a MusicXML string to a list of SVG pages (`options`: Verovio's, over
  * the screen's; the toolkit keeps options between calls, so every call sets
@@ -55,13 +109,20 @@ export async function renderMusicXml(musicXml, options = {}) {
 	if (musicXml.includes("<credit-type>title</credit-type>")) {
 		bigTitle(toolkit);
 	}
+	// the dynamics' own ids, as a class "id-<id>" (as a slur's second half)
+	const dyn = /<dynamics\b[^>]*\bid=/.test(musicXml)
+		? dynamicIds(toolkit, musicXml)
+		: new Map();
 	const pages = [];
 	for (let page = 1; page <= toolkit.getPageCount(); page++) {
 		// without Verovio's credit (an SVG <desc>; no option drops it)
 		pages.push(
 			toolkit
 				.renderToSVG(page)
-				.replace(/<desc>Engraved by Verovio[^<]*<\/desc>\s*/, ""),
+				.replace(/<desc>Engraved by Verovio[^<]*<\/desc>\s*/, "")
+				.replace(/<g id="([^"]+)" class="dynam"/g, (tag, id) =>
+					dyn.has(id) ? `<g id="${id}" class="dynam id-${dyn.get(id)}"` : tag,
+				),
 		);
 	}
 	return pages;

@@ -7,7 +7,8 @@
 // either end, or switch between tie and slur; missed ones are added from a
 // note ("+ Tie", "+ Slur to…"). Crescendos and diminuendos (hairpins) too:
 // deleted, switched, their ends moved along the notes, added from a note
-// ("+ Cresc. to…", "+ Dim. to…"). Edits are a list of operations (see
+// ("+ Cresc. to…", "+ Dim. to…"). Dynamics (p, mf, …) as well: changed,
+// moved to another note, deleted, or added at a note. Edits are a list of operations (see
 // pipeline/edit.js), each on a page, replayed by the recognition worker on its reading of that
 // page, so undo and redo are one operation less or more. Hovering a note
 // shows it on its page. The title and composer are shown above the score.
@@ -21,7 +22,11 @@ import {
 	watch,
 } from "vue";
 import { download } from "../download.js";
-import { addedHairpinRef, addedSpanRef } from "../pipeline/edit.js";
+import {
+	addedDynamicRef,
+	addedHairpinRef,
+	addedSpanRef,
+} from "../pipeline/edit.js";
 import { editRecognition } from "../pipeline/index.js";
 import { addedDet, boxKey, VALUES } from "../pipeline/place.js";
 import { musicXmlToMidi } from "../render/verovio.js";
@@ -75,6 +80,7 @@ const isHairpin = computed(() => selected.value?.family === "hairpin");
 // a tie, slur or hairpin: from one note to another
 const isSpan = computed(() => isCurve.value || isHairpin.value);
 const SPAN_FAMILIES = new Set(["curve", "hairpin"]);
+const isDynamic = computed(() => selected.value?.family === "dynamic");
 // the page shown beside the score: the hovered / selected note's (else the
 // last one shown)
 const lastPage = ref(0);
@@ -235,6 +241,8 @@ function remove() {
 	const s = selected.value;
 	if (SPAN_FAMILIES.has(s?.family)) {
 		editSpan({ kind: null });
+	} else if (s?.family === "dynamic") {
+		editDynamic(s, { value: null });
 	} else if (s) {
 		const next = neighbour(1) ?? neighbour(-1);
 		apply(
@@ -387,6 +395,64 @@ const tieTarget = computed(() => {
 	return line.slice(at + 1, at + 12).find((n) => samePitch(n, s)) ?? null;
 });
 
+// --------------------------------------------------------------- dynamics
+
+/**
+ * Set dynamic `d`'s value and note (value null: none); then select it (else
+ * its note), or `select`.
+ */
+function editDynamic(d, changes, select = undefined) {
+	const next = { value: d.value, at: d.at, ...changes };
+	apply(
+		{
+			type: "dynamic",
+			page: d.page,
+			ref: d.ref,
+			value: next.value,
+			at: byKey.value.get(next.at)?.box ?? null,
+		},
+		select !== undefined ? select : next.value ? d.key : next.at,
+	);
+}
+
+/** The dynamic at note `key`, if any. */
+const dynamicAt = (key) =>
+	result.value.symbols.find((s) => s.family === "dynamic" && s.at === key) ??
+	null;
+
+/** The selected note's dynamic, if any. */
+const noteDynamic = computed(() =>
+	isNote.value ? dynamicAt(selected.value.key) : null,
+);
+
+/**
+ * Set the dynamic of the selected note, or of the selected dynamic, to `v`
+ * (its own value again: none).
+ */
+function setDynamic(v) {
+	const s = selected.value;
+	const d = isDynamic.value ? s : noteDynamic.value;
+	if (d) {
+		editDynamic(
+			d,
+			{ value: d.value === v ? null : v },
+			isNote.value ? s.key : undefined,
+		);
+	} else if (isNote.value) {
+		// named after the note and the edit (several may be added at a note)
+		const ref = addedDynamicRef(s.box, ops.value.length);
+		apply({ type: "dynamic", page: s.page, ref, value: v, at: s.box }, s.key);
+	}
+}
+
+/** Move the selected dynamic to the previous / next note on its line. */
+function moveDynamic(step) {
+	const next = alongLine(selected.value.at, step);
+	if (next) {
+		editDynamic(selected.value, { at: next.key });
+	}
+}
+
 const addStaves = computed(
 	() => result.value.pageResults[addPage.value]?.staves ?? [],
 );
@@ -455,17 +521,19 @@ function nearest(event) {
 		return note;
 	}
 	const curve = event.target?.closest?.("g.slur, g.tie");
-	return (
-		byId.value.get(curve && curveId(curve)) ?? nearestHairpin(event) ?? note
-	);
+	return byId.value.get(curve && curveId(curve)) ?? nearestMark(event) ?? note;
 }
 
-/** The hairpin whose outline (a few pixels around) a pointer is in, or null. */
-function nearestHairpin({ clientX: x, clientY: y }) {
+/**
+ * The hairpin or dynamic whose outline (a few pixels around) a pointer is
+ * in, the smallest, or null.
+ */
+function nearestMark({ clientX: x, clientY: y }) {
 	let best = null;
 	let bestArea = Number.POSITIVE_INFINITY;
-	for (const el of scoreEl.value?.querySelectorAll("g.hairpin") ?? []) {
-		const s = byId.value.get(el.id);
+	for (const el of scoreEl.value?.querySelectorAll("g.hairpin, g.dynam") ??
+		[]) {
+		const s = byId.value.get(curveId(el));
 		const r = el.getBoundingClientRect();
 		const m = 4; // px
 		const area = r.width * r.height;
@@ -485,11 +553,12 @@ function nearestHairpin({ clientX: x, clientY: y }) {
 }
 
 /**
- * A tie or slur's id, from any of its parts (one across a line break is
- * drawn in two: the second classed "id-<its id>").
+ * A symbol's id on the score: a class "id-<its id>" (a tie or slur across a
+ * line break is drawn in two, the second so classed; a dynamic, whose id
+ * Verovio drops, see render/verovio.js), else its element's id.
  */
 const curveId = (el) =>
-	el.id || (el.getAttribute("class") ?? "").match(/\bid-(\S+)/)?.[1] || null;
+	(el.getAttribute("class") ?? "").match(/\bid-(\S+)/)?.[1] || el.id || null;
 
 /**
  * The note or rest nearest a pointer, within a few pixels (Verovio's glyphs
@@ -615,7 +684,7 @@ function onKey(event) {
 	if (!selected.value) {
 		return;
 	}
-	if (isSpan.value) {
+	if (isSpan.value || isDynamic.value) {
 		if (key === "Delete" || key === "Backspace") {
 			event.preventDefault();
 			remove();
@@ -670,6 +739,11 @@ function describeSymbol(s) {
 }
 
 function describeBase(s) {
+	if (s.family === "dynamic") {
+		const name = DYNAMIC_NAMES[s.value];
+		const at = pitchName(byKey.value.get(s.at));
+		return `Dynamic ${s.value}${name ? ` (${name})` : ""} · at ${at}`;
+	}
 	if (SPAN_FAMILIES.has(s.family)) {
 		const from = byKey.value.get(s.from);
 		const to = byKey.value.get(s.to);
@@ -743,6 +817,36 @@ const TUP_NAMES = {
 	"5/4": "quintuplet",
 	"6/4": "sextuplet",
 	"7/4": "septuplet",
+};
+
+// dynamics offered (see write.js DYN)
+const DYNAMIC_CHOICES = [
+	"ppp",
+	"pp",
+	"p",
+	"mp",
+	"mf",
+	"f",
+	"ff",
+	"fff",
+	"sf",
+	"sfz",
+	"fz",
+	"fp",
+];
+const DYNAMIC_NAMES = {
+	ppp: "pianississimo",
+	pp: "pianissimo",
+	p: "piano",
+	mp: "mezzo-piano",
+	mf: "mezzo-forte",
+	f: "forte",
+	ff: "fortissimo",
+	fff: "fortississimo",
+	sf: "sforzando",
+	sfz: "sforzato",
+	fz: "forzando",
+	fp: "forte-piano",
 };
 
 const ALTER_CHOICES = [
@@ -820,7 +924,8 @@ async function downloadMidi() {
 			</span>
 			<span v-else-if="pickHint" class="error">{{ pickHint }}</span>
 			<span v-else class="hint">
-				A first draft: click a note, tie, slur or hairpin to correct it.
+				A first draft: click a note, tie, slur, hairpin or dynamic to correct
+				it.
 			</span>
 		</p>
 		<AddSymbols
@@ -856,7 +961,29 @@ async function downloadMidi() {
 						<button class="link" title="Deselect (Esc)" @click="selectedKey = null">✕</button>
 					</div>
 					<p v-if="fitHint" class="hint">{{ fitHint }}</p>
-					<div v-if="isSpan" class="tools">
+					<div v-if="isDynamic" class="tools">
+						<div class="group" aria-label="Dynamic">
+							<button
+								v-for="v in DYNAMIC_CHOICES"
+								:key="v"
+								class="dyn"
+								:aria-pressed="selected.value === v"
+								:title="DYNAMIC_NAMES[v]"
+								@click="setDynamic(v)"
+							>
+								{{ v }}
+							</button>
+						</div>
+						<div class="group" aria-label="Note">
+							<span class="label">Note</span>
+							<button title="At the previous note" :disabled="!canMove('at', -1)" @click="moveDynamic(-1)">◀</button>
+							<button title="At the next note" :disabled="!canMove('at', 1)" @click="moveDynamic(1)">▶</button>
+						</div>
+						<div class="group">
+							<button class="danger" title="Delete (Del)" @click="remove">Delete</button>
+						</div>
+					</div>
+					<div v-else-if="isSpan" class="tools">
 						<div class="group" aria-label="Start">
 							<span class="label">Start</span>
 							<button title="Start on the previous note" :disabled="!canMove('from', -1)" @click="moveEnd('from', -1)">◀</button>
@@ -962,6 +1089,26 @@ async function downloadMidi() {
 							</button>
 							<button class="danger" title="Delete (Del)" @click="remove">Delete</button>
 						</div>
+						<div v-if="isNote" class="group" aria-label="Dynamic">
+							<button
+								v-for="v in DYNAMIC_CHOICES"
+								:key="v"
+								class="dyn"
+								:aria-pressed="noteDynamic?.value === v"
+								:disabled="!selected.written"
+								:title="noteDynamic?.value === v ? `Remove the ${DYNAMIC_NAMES[v]}` : `${DYNAMIC_NAMES[v]} at this note`"
+								@click="setDynamic(v)"
+							>
+								{{ v }}
+							</button>
+							<button
+								v-if="noteDynamic"
+								:title="`Select this dynamic (to move it)`"
+								@click="selectedKey = noteDynamic.key"
+							>
+								Select {{ noteDynamic.value }}
+							</button>
+						</div>
 						<div v-if="isNote" class="group" aria-label="Ties, slurs and hairpins">
 							<button
 								v-for="c in noteSpans"
@@ -985,7 +1132,7 @@ async function downloadMidi() {
 							</button>
 						</div>
 					</div>
-					<p class="hint keys">{{ isSpan ? "Del delete · Esc deselect" : "← → previous / next · Esc deselect" }}</p>
+					<p class="hint keys">{{ isSpan || isDynamic ? "Del delete · Esc deselect" : "← → previous / next · Esc deselect" }}</p>
 				</div>
 				<PageHighlight
 					v-if="highlightPage?.url"
@@ -1140,6 +1287,13 @@ async function downloadMidi() {
 
 .tools button.artic {
 	min-width: 1.9rem;
+	font-weight: 700;
+}
+
+.tools button.dyn {
+	min-width: 1.9rem;
+	font-family: "Times New Roman", Times, serif;
+	font-style: italic;
 	font-weight: 700;
 }
 

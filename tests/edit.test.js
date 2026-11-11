@@ -191,6 +191,27 @@ describe("replaying hand edits", () => {
 			{ ref: `h:${boxKey(hairpin)}`, kind: "dim", from: 0, to: 1, sym: 2 },
 		]);
 	});
+
+	it("passes dynamics set by hand to the writer", () => {
+		const r = reading();
+		r.layout.syms.push({ i: 2, box: [12, 25, 20, 30] }); // a dynamic
+		const [a, z, dyn] = r.layout.syms.map((s) => s.box);
+		const { reading: edited } = applyEdits(
+			r,
+			[
+				// the one read: changed and moved; one added, then deleted
+				{ type: "dynamic", ref: `d:${boxKey(dyn)}`, value: "p", at: a },
+				{ type: "dynamic", ref: `d:${boxKey(dyn)}`, value: "mf", at: z },
+				{ type: "dynamic", ref: "da:x#1", value: "f", at: a },
+				{ type: "dynamic", ref: "da:x#1", value: null, at: a },
+			],
+			staves,
+		);
+		expect([...edited.userDynamics.claimed]).toEqual([2]);
+		expect(edited.userDynamics.list).toEqual([
+			{ ref: `d:${boxKey(dyn)}`, value: "mf", at: 1, sym: 2 },
+		]);
+	});
 });
 
 // On real pages: needs the exported models (npm run fetch:models)
@@ -342,5 +363,44 @@ describe.skipIf(!haveModels)("ties and slurs on a real page", () => {
 			expect(xml).toContain(`<actual-notes>${actual}</actual-notes>`);
 			expect(out.symbols.find((x) => x.key === m.key).tup).toBe(tup);
 		}
+		// dynamics: read ones listed by their id; changed, deleted, added
+		const dyns = read.symbols.filter((s) => s.family === "dynamic");
+		expect(dyns.length).toBeGreaterThan(0);
+		for (const d of dyns) {
+			expect(read.musicXml).toContain(`<dynamics id="${d.id}">`);
+			expect(d.at).toMatch(/^0:/);
+		}
+		const [d] = dyns;
+		const dynOp = (value, at = box(d.at)) => ({
+			type: "dynamic",
+			ref: d.ref,
+			value,
+			at,
+		});
+		const loud = run([dynOp("ff")]);
+		const ff = loud.symbols.find((s) => s.ref === d.ref);
+		expect(ff).toMatchObject({ value: "ff", at: d.at, edited: true });
+		expect(loud.musicXml).toContain(`<dynamics id="${ff.id}">\n`);
+		const ffAt = loud.musicXml.indexOf(`id="${ff.id}"`);
+		expect(
+			loud.musicXml.slice(ffAt, loud.musicXml.indexOf("</dynamics>", ffAt)),
+		).toMatch(/<ff ?\/>/);
+		const none = run([dynOp(null)]);
+		expect(none.symbols.filter((s) => s.family === "dynamic")).toHaveLength(
+			dyns.length - 1,
+		);
+		const plain = notes.find(
+			(x) => x.written && !dyns.some((y) => y.at === x.key),
+		);
+		const more = run([
+			{ type: "dynamic", ref: "da:new#0", value: "sfz", at: plain.box },
+		]);
+		const sfz = more.symbols.find((s) => s.ref === "da:new#0");
+		expect(sfz).toMatchObject({ value: "sfz", at: plain.key });
+		// written just before its note
+		const sfzAt = more.musicXml.indexOf(`id="${sfz.id}"`);
+		const noteAt = more.musicXml.indexOf(`id="${plain.id}"`);
+		expect(sfzAt).toBeGreaterThan(0);
+		expect(more.musicXml.slice(sfzAt, noteAt)).not.toContain("</note>");
 	}, 120000);
 });

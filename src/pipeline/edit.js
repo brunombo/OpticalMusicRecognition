@@ -17,6 +17,10 @@
 //       by hand: kind "cres" | "dim", or null (none); from / to, the boxes of
 //       the notes it starts and ends at. `ref`: one read on the page ("h:<its
 //       box>"), or one added ("ha:<from box>><to box>")
+//   { type: "dynamic", ref, value, at } a dynamic set by hand: value "p",
+//       "mf", "sfz", … or null (none); at, the box of the note it is placed
+//       at. `ref`: one read on the page ("d:<its box>"), or one added
+//       ("da:<note box>#<n>")
 // Symbols are named by their box, which stays the same when the page is read
 // again with added symbols (symbol indices do not). Hand edits always win
 // over the reader's own choices.
@@ -121,6 +125,7 @@ export function applyEdits(reading, ops, staves) {
 	const edited = new Set();
 	const spans = new Map(); // ref → the span set by hand (see write.js)
 	const hairpins = new Map(); // ref → the hairpin set by hand
+	const dynamics = new Map(); // ref → the dynamic set by hand
 	const tokenOf = (key) => {
 		const si = siByKey.get(key);
 		return si === undefined ? null : (tok.get(si) ?? null);
@@ -150,6 +155,9 @@ export function applyEdits(reading, ops, staves) {
 			edited.add(op.ref);
 		} else if (op.type === "hairpin") {
 			hairpins.set(op.ref, op);
+			edited.add(op.ref);
+		} else if (op.type === "dynamic") {
+			dynamics.set(op.ref, op);
 			edited.add(op.ref);
 		}
 	}
@@ -183,8 +191,30 @@ export function applyEdits(reading, ops, staves) {
 			userHairpins.list.push({ ref, kind: op.kind, from, to, sym: at ?? null });
 		}
 	}
-	return { reading: { ...reading, tok, userSpans, userHairpins }, edited };
+	// dynamics, as write.js takes them: { claimed (symbols read, set by
+	// hand), list ([{ ref, value, at (a note), sym (the one read, or null) }]) }
+	const userDynamics = { claimed: new Set(), list: [] };
+	for (const [ref, op] of dynamics) {
+		const sym = ref.startsWith("d:") ? siByKey.get(ref.slice(2)) : undefined;
+		if (sym !== undefined) {
+			userDynamics.claimed.add(sym);
+		}
+		const at = op.at && siByKey.get(boxKey(op.at));
+		if (op.value && at !== undefined) {
+			userDynamics.list.push({ ref, value: op.value, at, sym: sym ?? null });
+		}
+	}
+	return {
+		reading: { ...reading, tok, userSpans, userHairpins, userDynamics },
+		edited,
+	};
 }
+
+/**
+ * The ref of a dynamic added by hand at a note (its box), the `n`-th edit
+ * (several may be added at a note, and moved away).
+ */
+export const addedDynamicRef = (at, n) => `da:${boxKey(at)}#${n}`;
 
 /** The ref of a hairpin added by hand between two notes (their boxes). */
 export const addedHairpinRef = (from, to) => `ha:${boxKey(from)}>${boxKey(to)}`;
@@ -217,6 +247,7 @@ export function resultOf(reading, edited = new Set(), page = 0) {
 	const written = new Map();
 	const spans = [];
 	const hairpins = [];
+	const dynamics = [];
 	const prefix = `p${page}-`;
 	const tree = writeTree(reading, {
 		noteIds: true,
@@ -224,6 +255,7 @@ export function resultOf(reading, edited = new Set(), page = 0) {
 		idPrefix: prefix,
 		spans,
 		hairpins,
+		dynamics,
 	});
 	const musicXml = xmlDocument(tree);
 	const L = reading.layout;
@@ -382,6 +414,52 @@ export function resultOf(reading, edited = new Set(), page = 0) {
 			edited: true,
 		});
 	}
+	// the dynamics written: read (placed by x: shown at the note nearest it),
+	// or set by hand (at a note)
+	const claimedDyn = reading.userDynamics?.claimed ?? new Set();
+	for (const s of L.syms) {
+		const r = reading.tok.get(s.i);
+		const id = `${prefix}dy-${s.i}`;
+		if (
+			!r ||
+			family(r.cls.v) !== "dynam" ||
+			r.real.p < REAL ||
+			claimedDyn.has(s.i) ||
+			s.staff < 0 ||
+			!musicXml.includes(`id="${id}"`)
+		) {
+			continue;
+		}
+		const at = nearestNote(s, s.cx);
+		const ref = `d:${boxKey(s.box)}`;
+		symbols.push({
+			id,
+			key: `${page}:${ref}`,
+			ref,
+			page,
+			family: "dynamic",
+			value: r.cls.v.slice("dynam_".length),
+			box: s.box.map(Number),
+			at: at && noteKey(at.i),
+			edited: false,
+		});
+	}
+	for (const d of dynamics) {
+		if (!d.id || !musicXml.includes(`id="${d.id}"`)) {
+			continue;
+		}
+		symbols.push({
+			id: d.id,
+			key: `${page}:${d.ref}`,
+			ref: d.ref,
+			page,
+			family: "dynamic",
+			value: d.value,
+			box: box(d.sym ?? d.at),
+			at: noteKey(d.at),
+			edited: true,
+		});
+	}
 	return {
 		musicXml,
 		tree,
@@ -395,6 +473,7 @@ export function resultOf(reading, edited = new Set(), page = 0) {
 			ties: symbols.filter((s) => s.kind === "tie").length,
 			slurs: symbols.filter((s) => s.kind === "slur").length,
 			hairpins: symbols.filter((s) => s.family === "hairpin").length,
+			dynamics: symbols.filter((s) => s.family === "dynamic").length,
 			changed: symbols.filter((s) => s.changed).length,
 			edited: edited.size,
 		},

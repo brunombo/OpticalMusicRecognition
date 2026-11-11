@@ -527,8 +527,18 @@ function events(rd, staff, bar, clef, key) {
 			evs.push(event({ x: s.cx, kind: "mrest", voice: 1, si: s.i }));
 		} else if (f === "mRpt" || f === "multiRpt") {
 			marks.repeatBar = true;
-		} else if (f === "dynam" && DYN.has(c.slice("dynam_".length))) {
-			dirs.push([s.cx, "dyn", c.slice("dynam_".length), s.cy > st.mid]);
+		} else if (
+			f === "dynam" &&
+			DYN.has(c.slice("dynam_".length)) &&
+			!rd.userDynamics?.claimed.has(s.i)
+		) {
+			dirs.push([
+				s.cx,
+				"dyn",
+				c.slice("dynam_".length),
+				s.cy > st.mid,
+				s.i, // this app: the dynamic's symbol, to name it (see direction)
+			]);
 		} else if (
 			f === "hairpin" &&
 			(c === "hairpin_cres" || c === "hairpin_dim") &&
@@ -1675,8 +1685,9 @@ function pageMeter(rd, build) {
 
 // ------------------------------------------------------------------ writing
 /**
- * A direction (`ids`: this app's id prefix, to name a hairpin's start: by
- * its symbol, "<ids>hp-<index>", or the id it comes with; null: none).
+ * A direction (`ids`: this app's id prefix, to name a hairpin's start or a
+ * dynamic: by its symbol, "<ids>hp-<index>" / "<ids>dy-<index>", or the id
+ * it comes with; null: none).
  */
 function direction(meas, d, staffNo, ids = null) {
 	const [, kind, payload, below, name] = d;
@@ -1700,7 +1711,11 @@ function direction(meas, d, staffNo, ids = null) {
 	});
 	const dt = de.sub("direction-type");
 	if (kind === "dyn") {
-		dt.sub("dynamics").sub(payload);
+		const id =
+			ids === null || name === undefined
+				? {}
+				: { id: typeof name === "number" ? `${ids}dy-${name}` : name };
+		dt.sub("dynamics", null, id).sub(payload);
 	} else if (kind === "wedge") {
 		const id =
 			ids === null || name === undefined
@@ -1873,9 +1888,10 @@ export function writeTree(
 		idPrefix = "",
 		spans = null,
 		hairpins = null,
+		dynamics = null,
 	} = {},
 ) {
-	const ids = noteIds ? idPrefix : null; // to name hairpins (see direction)
+	const ids = noteIds ? idPrefix : null; // to name hairpins and dynamics
 	// the ties and slurs written: { ref, kind, from, to (events), curve }
 	const drawn = [];
 	const L = rd.layout;
@@ -2139,6 +2155,18 @@ export function writeTree(
 			to: last.si,
 			id: ids === null ? null : id,
 		});
+	});
+	// dynamics set by hand: before a note
+	(rd.userDynamics?.list ?? []).forEach((d, k) => {
+		const e = eventOf.get(d.at);
+		if (!e || !DYN.has(d.value)) {
+			return;
+		}
+		const sym = d.sym === null ? null : L.syms[d.sym];
+		const below = sym ? sym.cy > L.staves[sym.staff].mid : true;
+		const id = `${idPrefix}dyu-${k}`;
+		e.pre.push(["dyn", d.value, below, id]);
+		dynamics?.push({ ...d, at: e.si, id: ids === null ? null : id });
 	});
 	spans?.push(
 		...drawn.map(({ ref, kind, from, to, curve, id }) => ({
