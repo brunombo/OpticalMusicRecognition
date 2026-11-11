@@ -168,6 +168,7 @@ function event(fields) {
 		chord: false,
 		grace: "none",
 		tup: "none",
+		tupUser: false, // this app: the tuplet set by hand (kept as it is)
 		step: "C",
 		octave: 4,
 		alter: 0,
@@ -490,6 +491,7 @@ function events(rd, staff, bar, clef, key) {
 					chord: (r.chord ?? 0) > 0.5,
 					grace: r.grace.v,
 					tup: r.tup.v,
+					tupUser: !!r.tup.user,
 					step,
 					octave: octv,
 					alter: alt,
@@ -511,6 +513,7 @@ function events(rd, staff, bar, clef, key) {
 					dots: r.dots.v,
 					voice: r.voice.v,
 					tup: r.tup.v,
+					tupUser: !!r.tup.user,
 					si: s.i,
 					onset: r.onset ?? null,
 					onsetP: r.onset_p ?? 0,
@@ -664,11 +667,21 @@ function dur48(e, t) {
  * of the bar's end priced as a missed event), or null.
  */
 export function decodeRhythm(order, strict = false, barLen = null) {
+	// this app: a tuplet set by hand off the grid (5, 7: not in 48ths) is
+	// left out, and follows the event before it
+	const offGrid = (e) =>
+		e.tupUser && e.tup !== "other" && dur48(e, e.tup) === null;
+	for (const e of order) {
+		if (offGrid(e)) {
+			e.onset = null;
+		}
+	}
 	const evs = order.filter(
 		(e) =>
 			e.grace === "none" &&
 			(e.kind === "note" || e.kind === "rest") &&
-			e.dist !== null,
+			e.dist !== null &&
+			!offGrid(e),
 	);
 	if (!evs.length) {
 		return null;
@@ -722,10 +735,13 @@ export function decodeRhythm(order, strict = false, barLen = null) {
 		}
 		return best;
 	}
+	// (this app: a tuplet set by hand is the only choice, when it can be)
 	const choices = evs.map((e) =>
-		[...new Set([...TUP_CHOICES, e.tup])].filter(
-			(t) => t !== "other" && dur48(e, t),
-		),
+		e.tupUser && e.tup !== "other" && dur48(e, e.tup)
+			? [e.tup]
+			: [...new Set([...TUP_CHOICES, e.tup])].filter(
+					(t) => t !== "other" && dur48(e, t),
+				),
 	);
 	let score = emit(evs[0]);
 	const back = [];
@@ -2375,6 +2391,7 @@ export function writeTree(
 									type: e.typ,
 									dots: e.dots,
 									artic: e.marks.filter((c) => c in ARTIC),
+									tup: e.tup,
 									pitch:
 										e.kind === "note" && !e.unpitched
 											? { step: e.step, octave: e.octave, alter: e.alter }

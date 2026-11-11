@@ -3,7 +3,8 @@
 //   { type: "set", box, field, value }   field: "cls" (note_… / rest_…),
 //       "pos" (staff position, half staff spaces up from the middle line),
 //       "alter" ("key" or -2 … 2), "dots" (0 … 2), "artic" (its
-//       articulations: artic_stacc, artic_ten, …, in place of those read) or
+//       articulations: artic_stacc, artic_ten, …, in place of those read),
+//       "tup" (its tuplet: "none", "3/2", "5/4", … see TUPLETS) or
 //       "deleted" (true)
 //   { type: "add", cls, at: [x, y] }     a note or rest the detector missed,
 //       placed at a point of the page (see addedDet)
@@ -94,6 +95,9 @@ function setField(r, field, value) {
 			break;
 		case "dots":
 			r.dots = { ...r.dots, v: value, p: 1 };
+			break;
+		case "tup":
+			r.tup = { ...r.tup, v: value, p: 1, user: true };
 			break;
 		case "artic":
 			r.artic = { v: [...value], user: true };
@@ -254,6 +258,8 @@ export function resultOf(reading, edited = new Set(), page = 0) {
 			alter: r.alter?.user ? r.alter.v : null, // set by hand
 			// its articulations as written (artic_stacc, …), or null
 			artic: written.get(s.i)?.artic ?? null,
+			// its tuplet as written ("none", "3/2", …), or null
+			tup: written.get(s.i)?.tup ?? null,
 			// as written (null when not written): the pitch, and the value,
 			// which the writer shortens when it does not fit in the bar
 			pitch: written.get(s.i)?.pitch ?? null,

@@ -634,6 +634,7 @@ function onKey(event) {
 		n: () => setAlter(0),
 		k: () => setAlter("key"),
 		r: toggleRest,
+		t: () => set("tup", selected.value.tup === "3/2" ? "none" : "3/2"),
 		"'": () => toggleArtic("artic_stacc"),
 		"-": () => toggleArtic("artic_ten"),
 		">": () => toggleArtic("artic_acc"),
@@ -664,6 +665,11 @@ function describe(s) {
 }
 
 function describeSymbol(s) {
+	const tuplet = TUP_NAMES[s.tup] ? ` · ${TUP_NAMES[s.tup]}` : "";
+	return describeBase(s) + (SPAN_FAMILIES.has(s.family) ? "" : tuplet);
+}
+
+function describeBase(s) {
 	if (SPAN_FAMILIES.has(s.family)) {
 		const from = byKey.value.get(s.from);
 		const to = byKey.value.get(s.to);
@@ -718,6 +724,25 @@ const ARTIC_EXCLUDES = {
 	artic_stacciss: "artic_stacc",
 	artic_acc: "artic_marc",
 	artic_marc: "artic_acc",
+};
+
+// tuplets offered: [value (see TUPLETS), label, title]
+const TUP_CHOICES = [
+	["none", "No tuplet", "Not in a tuplet"],
+	["3/2", "3", "Triplet: 3 in the time of 2 (t)"],
+	["2/3", "2", "Duplet: 2 in the time of 3"],
+	["4/3", "4", "Quadruplet: 4 in the time of 3"],
+	["5/4", "5", "Quintuplet: 5 in the time of 4"],
+	["6/4", "6", "Sextuplet: 6 in the time of 4"],
+	["7/4", "7", "Septuplet: 7 in the time of 4"],
+];
+const TUP_NAMES = {
+	"3/2": "triplet",
+	"2/3": "duplet",
+	"4/3": "quadruplet",
+	"5/4": "quintuplet",
+	"6/4": "sextuplet",
+	"7/4": "septuplet",
 };
 
 const ALTER_CHOICES = [
@@ -902,6 +927,18 @@ async function downloadMidi() {
 								:aria-pressed="selected.alter === a"
 								:title="title"
 								@click="setAlter(a)"
+							>
+								{{ text }}
+							</button>
+						</div>
+						<div class="group" aria-label="Tuplet">
+							<button
+								v-for="[t, text, title] in TUP_CHOICES"
+								:key="t"
+								:aria-pressed="selected.tup === t"
+								:disabled="!selected.written"
+								:title="title"
+								@click="set('tup', t)"
 							>
 								{{ text }}
 							</button>

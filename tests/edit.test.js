@@ -327,5 +327,20 @@ describe.skipIf(!haveModels)("ties and slurs on a real page", () => {
 		expect(marked.symbols.find((x) => x.key === n.key).artic).toEqual([
 			"artic_ten",
 		]);
+		// tuplets set by hand are kept: on the grid (3) or off it (5)
+		for (const [tup, actual] of [
+			["3/2", "3"],
+			["5/4", "5"],
+		]) {
+			const m = notes.find((x) => x.written && x.tup === "none");
+			const out = run([{ type: "set", box: m.box, field: "tup", value: tup }]);
+			const from = out.musicXml.indexOf(`id="${m.id}"`);
+			const xml = out.musicXml.slice(
+				from,
+				out.musicXml.indexOf("</note>", from),
+			);
+			expect(xml).toContain(`<actual-notes>${actual}</actual-notes>`);
+			expect(out.symbols.find((x) => x.key === m.key).tup).toBe(tup);
+		}
 	}, 120000);
 });
