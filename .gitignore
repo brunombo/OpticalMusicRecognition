@@ -18,3 +18,6 @@ out/
 # copisteria checkout used by scripts/models/export_copista.py
 .cache/
 public/models/*.json
+
+# Sound bank (fetched via `npm run fetch:soundfont`)
+public/soundfonts/*.sf2

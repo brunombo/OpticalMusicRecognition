@@ -1,6 +1,7 @@
 # Build the app and deploy it to GitHub Pages. The ONNX models are not part
 # of the site: the app loads them from Hugging Face (VITE_MODELS_URL), where
-# scripts/models/upload_hf.py publishes them. The deploy stays small (~40 MB).
+# scripts/models/upload_hf.py publishes them. The deploy stays small (~40 MB, and
+# ~13 MB of sound bank, fetched by scripts/soundfont/fetch.mjs).
 name: Deploy to GitHub Pages
 
 on:
@@ -34,6 +35,9 @@ jobs:
         run: |
           npx biome check .
           npm test
+
+      - name: Sound bank
+        run: npm run fetch:soundfont
 
       - name: Build
         env:

@@ -29,10 +29,10 @@ import {
 } from "../pipeline/edit.js";
 import { editRecognition } from "../pipeline/index.js";
 import { addedDet, boxKey, VALUES } from "../pipeline/place.js";
-import { musicXmlToMidi } from "../render/verovio.js";
 import { buildScore } from "../score.js";
 import { useOmrState } from "../useOmr.js";
 import AddSymbols from "./AddSymbols.vue";
+import AudioPanel from "./AudioPanel.vue";
 import ExportButtons from "./ExportButtons.vue";
 import PageHighlight from "./PageHighlight.vue";
 
@@ -887,11 +887,6 @@ function downloadMusicXml() {
 		}),
 	);
 }
-
-async function downloadMidi() {
-	const bytes = await musicXmlToMidi(result.value.musicXml);
-	download("score.mid", new Blob([bytes], { type: "audio/midi" }));
-}
 </script>
 
 <template>
@@ -929,7 +924,6 @@ async function downloadMidi() {
 			<div class="section" aria-label="Download">
 				<span class="label">Download</span>
 				<button title="Download MusicXML" @click="downloadMusicXml">MusicXML</button>
-				<button class="secondary" :disabled="result.summary.notes === 0" title="Download MIDI" @click="downloadMidi">MIDI</button>
 				<ExportButtons step="score" :music-xml="result.musicXml" :arrows="false" />
 			</div>
 		</div>
@@ -1183,6 +1177,7 @@ async function downloadMidi() {
 			</div>
 		</div>
 		<p v-else class="hint">No notes found — nothing to render.</p>
+		<AudioPanel v-if="result.summary.notes > 0" :music-xml="result.musicXml" />
 	</div>
 </template>
 

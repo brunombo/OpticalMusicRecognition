@@ -1,0 +1,35 @@
+# Lint, test and build every branch but main (main is built by pages.yml).
+name: CI
+
+on:
+  push:
+    branches-ignore: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Lint and test
+        run: |
+          npx biome check .
+          npm test
+
+      - name: Sound bank
+        run: npm run fetch:soundfont
+
+      - name: Build
+        run: npm run build

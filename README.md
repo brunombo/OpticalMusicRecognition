@@ -17,7 +17,7 @@ geometry-only front end finds staves, systems and bars, a small transformer
 systems, and a writer decodes rhythm, accidentals and meter into MusicXML.
 The three networks run in **ONNX Runtime Web** (WebGPU for the detector trunk
 when available, WASM otherwise) inside a Web Worker. Verovio (WASM) renders
-the result and exports MIDI.
+the result.
 
 ```mermaid
 flowchart LR
@@ -27,8 +27,25 @@ flowchart LR
     D --> E[Front end<br/>staves, systems, bars]
     E --> F[Evidence model<br/>ONNX, 2M params]
     F --> G[Writer: meter, rhythm Viterbi,<br/>accidentals → MusicXML]
-    G --> H[Verovio: SVG + MIDI]
+    G --> H[Verovio: SVG]
+    G --> I[Performance<br/>a line of notes per staff]
+    I --> J[MIDI type 1<br/>a track and a program per staff]
+    I --> K[SoundFont synthesiser<br/>audio worker]
+    K --> L[Playback, WAV<br/>mix or a file per staff]
 ```
+
+## Audio
+
+Under the score, each staff gets an instrument (18 are offered, in five
+families), a volume and a pan, with mute and solo; tempo, transposition and
+reverb are set for the whole score. `src/audio/` reads the MusicXML as it is
+played (repeats, endings, da capo and dal segno unfolded on request, ties
+joined), writes the MIDI file itself (Verovio's does not carry the chosen
+instruments) and renders the sound with its own SoundFont player, in plain
+JavaScript, in a Web Worker: a three-minute string quartet renders in about
+two seconds on a desktop. The sound bank (≈ 12.6 MB, kept in the Cache API) is
+cut from GeneralUser GS by `npm run fetch:soundfont`. The bank's modulators
+and LFOs are not played; MP3 export is not there yet.
 
 Two detector sizes are offered: **copista-2m** (default, ≈16 MB of models)
 and **copista-28m** (≈124 MB, better pitch accuracy).
@@ -45,6 +62,8 @@ file's header for the engraving rules it relies on).
 npm install
 npm run fetch:models   # needs uv: clones copisteria (pinned), downloads the
                        # copista weights and exports them to public/models/*.onnx
+npm run fetch:soundfont # needs git: GeneralUser GS (pinned), cut down to
+                       # public/soundfonts/catalogue.sf2
 npm run dev            # http://localhost:3000
 ```
 

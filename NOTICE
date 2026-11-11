@@ -15,3 +15,9 @@ converted to ONNX by scripts/models/export_copista.py.
 Third-party runtime libraries: ONNX Runtime Web (MIT), Verovio (LGPL-3.0),
 Vue (MIT), coi-serviceworker 0.1.7 (MIT, Guido Zuidhof and contributors —
 public/coi-serviceworker.js, LICENSES/coi-serviceworker-MIT.txt).
+
+The sound bank served as soundfonts/catalogue.sf2 is cut from GeneralUser GS
+v2.0.3 by S. Christian Collins (https://www.schristiancollins.com), under the
+GeneralUser GS licence v2.0 (LICENSES/GeneralUser-GS.txt): the presets of the
+app's instruments, their samples unchanged (scripts/soundfont/). The reverb in
+src/audio/synth.js follows Freeverb by Jezar at Dreampoint (public domain).
