@@ -25,6 +25,7 @@ import { PPQ, readPerformance } from "../audio/performance.js";
 import { renderedSeconds } from "../audio/synth.js";
 import { wavSize } from "../audio/wav.js";
 import { download } from "../download.js";
+import { SUPPORT_URL } from "../support.js";
 
 const props = defineProps({
 	musicXml: { type: String, required: true },
@@ -222,6 +223,15 @@ function downloadMidi() {
 		})),
 	});
 	download("score.mid", new Blob([bytes], { type: "audio/midi" }));
+	exported.value = true;
+}
+
+// after a successful export, one line inviting support, until it is closed
+const exported = ref(false);
+const supportClosed = ref(stored().supportClosed ?? false);
+function closeSupport() {
+	supportClosed.value = true;
+	store({ supportClosed: true });
 }
 
 const stems = ref(stored().stems ?? false);
@@ -256,6 +266,7 @@ function downloadWav() {
 			download(name, new Blob([file.bytes], { type: "audio/wav" }));
 			await pause(300); // browsers drop downloads started at once
 		}
+		exported.value = true;
 	});
 }
 
@@ -361,6 +372,11 @@ onBeforeUnmount(stopAudio);
 				<span v-else-if="busy" class="status">Rendu en cours…</span>
 				<span v-else-if="error" class="error">{{ error }}</span>
 			</p>
+			<p v-if="exported && !supportClosed" class="support">
+				Fichier prêt. Si l'application vous a servi, vous pouvez
+				<a :href="SUPPORT_URL" target="_blank" rel="noopener">soutenir son développement sur Ko-fi</a>.
+				<button class="link" aria-label="Fermer ce message" @click="closeSupport">✕</button>
+			</p>
 		</template>
 	</section>
 </template>
@@ -453,6 +469,21 @@ button.link {
 	padding: 0;
 	text-decoration: underline;
 	font-size: inherit;
+}
+
+.support {
+	margin: 0.5rem 0 0;
+	font-size: 0.9rem;
+	color: var(--muted);
+}
+
+.support a {
+	color: var(--accent);
+}
+
+.support button {
+	margin-left: 0.5rem;
+	text-decoration: none;
 }
 
 .status-line {
