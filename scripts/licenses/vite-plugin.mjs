@@ -99,19 +99,24 @@ export default function thirdPartyLicences({ root = process.cwd() } = {}) {
 					})),
 				});
 			}
+			const own = join(root, "LICENSES");
+			const ownFiles = readdirSync(own).sort();
 			const list = [...packages.values()].sort((a, b) =>
 				a.key.localeCompare(b.key),
 			);
 			for (const p of list) {
+				// a package that ships no licence text has it in LICENSES/,
+				// named after the package
+				const name = p.key.slice(0, p.key.lastIndexOf("@"));
+				p.covered = ownFiles.filter((f) => f.startsWith(`${name}-`));
 				if (!p.licence) {
 					this.warn(`${p.key}: no licence in package.json`);
 				}
-				if (p.texts.length === 0) {
-					this.warn(`${p.key}: no licence file`);
+				if (p.texts.length === 0 && p.covered.length === 0) {
+					this.warn(`${p.key}: no licence text, here or in LICENSES/`);
 				}
 			}
 
-			const own = join(root, "LICENSES");
 			const parts = [
 				"Third-party software and data in this site, and their licences.",
 				"",
@@ -122,7 +127,7 @@ export default function thirdPartyLicences({ root = process.cwd() } = {}) {
 					(p) => `  ${p.key}  ${p.licence ?? "(licence not stated)"}`,
 				),
 			];
-			for (const f of readdirSync(own).sort()) {
+			for (const f of ownFiles) {
 				parts.push(
 					"",
 					RULE,
@@ -141,6 +146,9 @@ export default function thirdPartyLicences({ root = process.cwd() } = {}) {
 				for (const t of p.texts) {
 					parts.push("", `--- ${t.file} ---`, "", t.text);
 				}
+				for (const f of p.covered) {
+					parts.push("", `See LICENSES/${f} above.`);
+				}
 			}
 			this.emitFile({
 				type: "asset",
@@ -153,7 +161,7 @@ export default function thirdPartyLicences({ root = process.cwd() } = {}) {
 					list
 						.map(
 							(p) =>
-								`  ${p.key}  ${p.licence ?? "?"}  [${p.texts.map((t) => t.file).join(", ") || "no file"}]`,
+								`  ${p.key}  ${p.licence ?? "?"}  [${[...p.texts.map((t) => t.file), ...p.covered.map((f) => `LICENSES/${f}`)].join(", ") || "no text"}]`,
 						)
 						.join("\n"),
 			);

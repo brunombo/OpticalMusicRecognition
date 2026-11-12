@@ -19,6 +19,11 @@ licence texts are LICENSES/verovio-LGPL-3.0.txt and the GPL v3 it builds on,
 LICENSES/verovio-GPL-3.0.txt (the npm package ships neither). It is loaded as
 its own file, so it can be replaced by another build of Verovio.
 
+ONNX Runtime Web 1.27.0 (Microsoft, MIT) ships no licence text in its npm
+package: LICENSES/onnxruntime-web-MIT.txt and its third-party notices,
+LICENSES/onnxruntime-web-ThirdPartyNotices.txt, come from the v1.27.0 tag of
+https://github.com/microsoft/onnxruntime.
+
 Third-party runtime libraries: ONNX Runtime Web (MIT), Verovio (LGPL-3.0),
 Vue (MIT), coi-serviceworker 0.1.7 (MIT, Guido Zuidhof and contributors —
 public/coi-serviceworker.js, LICENSES/coi-serviceworker-MIT.txt).
