@@ -42,20 +42,38 @@ const licenceOf = (json) =>
 			json.licenses?.map((l) => l.type ?? l).join(" OR ") ??
 			null);
 
+// the packages seen so far: Web Workers are bundled apart (and before the
+// main bundle's generateBundle), so their instance collects into the same set
+const dirs = new Set();
+
+function collect(bundle) {
+	for (const chunk of Object.values(bundle)) {
+		for (const id of chunk.moduleIds ?? Object.keys(chunk.modules ?? {})) {
+			const dir = packageDir(id);
+			if (dir) {
+				dirs.add(dir);
+			}
+		}
+	}
+}
+
+/** For `worker.plugins`: collects the workers' packages, writes nothing. */
+export function workerLicences() {
+	return {
+		name: "third-party-licences-worker",
+		apply: "build",
+		generateBundle(_, bundle) {
+			collect(bundle);
+		},
+	};
+}
+
 export default function thirdPartyLicences({ root = process.cwd() } = {}) {
 	return {
 		name: "third-party-licences",
 		apply: "build",
 		generateBundle(_, bundle) {
-			const dirs = new Set();
-			for (const chunk of Object.values(bundle)) {
-				for (const id of chunk.moduleIds ?? Object.keys(chunk.modules ?? {})) {
-					const dir = packageDir(id);
-					if (dir) {
-						dirs.add(dir);
-					}
-				}
-			}
+			collect(bundle);
 			const packages = new Map();
 			for (const dir of dirs) {
 				const found = manifest(dir);

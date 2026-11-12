@@ -1,7 +1,9 @@
 import { fileURLToPath } from "node:url";
 import vue from "@vitejs/plugin-vue";
 import { defineConfig } from "vite";
-import thirdPartyLicences from "./scripts/licenses/vite-plugin.mjs";
+import thirdPartyLicences, {
+	workerLicences,
+} from "./scripts/licenses/vite-plugin.mjs";
 
 export default defineConfig(({ command }) => ({
 	// The site's path: "/" locally, "/<repo>/" on GitHub Pages (set by CI)
@@ -47,6 +49,7 @@ export default defineConfig(({ command }) => ({
 	// Our recognition worker uses dynamic imports → must be an ES module
 	worker: {
 		format: "es",
+		plugins: () => [workerLicences()],
 	},
 	test: {
 		environment: "node",
