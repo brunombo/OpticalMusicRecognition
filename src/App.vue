@@ -2,7 +2,7 @@
 // The header and the steps. The state is shared through "omr" (useOmr.js).
 import { provide } from "vue";
 import StepTabs from "./components/StepTabs.vue";
-import { SUPPORT_URL, UPSTREAM_URL } from "./support.js";
+import { LICENCES_URL, SUPPORT_URL, UPSTREAM_URL } from "./support.js";
 import { useOmr } from "./useOmr.js";
 
 provide("omr", useOmr());
@@ -32,6 +32,10 @@ provide("omr", useOmr());
 					<a :href="UPSTREAM_URL" target="_blank" rel="noopener">MusicOCR</a>
 					(Paul Dubois), qui s'appuie sur copisteria (KobiMusic). Les sons
 					viennent de la banque GeneralUser GS (S. Christian Collins).
+				</p>
+				<p>
+					<a :href="LICENCES_URL" target="_blank" rel="noopener">Licences des composants utilisés</a>
+					(textes complets, dont les exclusions de garantie).
 				</p>
 			</details>
 		</footer>

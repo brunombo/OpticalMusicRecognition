@@ -16,6 +16,16 @@ Third-party runtime libraries: ONNX Runtime Web (MIT), Verovio (LGPL-3.0),
 Vue (MIT), coi-serviceworker 0.1.7 (MIT, Guido Zuidhof and contributors —
 public/coi-serviceworker.js, LICENSES/coi-serviceworker-MIT.txt).
 
+Page corners are found with DocAligner (DocsaidLab,
+https://github.com/DocsaidLab/DocAligner, Apache License 2.0 — see
+LICENSES/docaligner-Apache-2.0.txt): src/pipeline/capture/docaligner.js runs
+its lcnet100 model, converted to ONNX.
+
+The build writes THIRD_PARTY_LICENSES.txt into the site: this notice, the
+files in LICENSES/, and every npm package in the bundle (Vue, ONNX Runtime
+Web, Verovio, jsPDF and svg2pdf.js among them) with its licence texts
+(scripts/licenses/vite-plugin.mjs).
+
 The sound bank served as soundfonts/catalogue.sf2 is cut from GeneralUser GS
 v2.0.3 by S. Christian Collins (https://www.schristiancollins.com), under the
 GeneralUser GS licence v2.0 (LICENSES/GeneralUser-GS.txt): the presets of the

@@ -4,3 +4,6 @@
 export const SUPPORT_URL = "https://ko-fi.com/brunomenon";
 export const UPSTREAM_URL =
 	"https://github.com/pauldubois98/OpticalMusicRecognition";
+
+/** The licences of what the site ships, written at build time. */
+export const LICENCES_URL = `${import.meta.env.BASE_URL}THIRD_PARTY_LICENSES.txt`;

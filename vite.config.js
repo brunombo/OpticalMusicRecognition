@@ -1,11 +1,12 @@
 import { fileURLToPath } from "node:url";
 import vue from "@vitejs/plugin-vue";
 import { defineConfig } from "vite";
+import thirdPartyLicences from "./scripts/licenses/vite-plugin.mjs";
 
 export default defineConfig(({ command }) => ({
 	// The site's path: "/" locally, "/<repo>/" on GitHub Pages (set by CI)
 	base: process.env.BASE_PATH ?? "/",
-	plugins: [vue()],
+	plugins: [vue(), thirdPartyLicences()],
 	resolve: {
 		// Verovio imports node:module only when running under Node; the
 		// browser bundle gets a stub (tests and node scripts keep the real one)
