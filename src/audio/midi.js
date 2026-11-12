@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0 — Copyright 2026 Bruno Menon
 // A Standard MIDI File (type 1) from a performance: a conductor track (tempo,
 // time and key signatures), then one track per staff with its own channel,
 // program (instrument), volume and pan.

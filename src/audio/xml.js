@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0 — Copyright 2026 Bruno Menon
 // A minimal XML reader: enough for MusicXML, and usable where DOMParser is
 // not (Web Workers, Node). Elements are { tag, attrs, children, text }.
 

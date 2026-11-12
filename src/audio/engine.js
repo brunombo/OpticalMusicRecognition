@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0 — Copyright 2026 Bruno Menon
 // The audio side of the app, on the main thread: fetches the sound bank
 // (kept in the Cache API), hands it to the audio worker, asks for renderings
 // and plays them.

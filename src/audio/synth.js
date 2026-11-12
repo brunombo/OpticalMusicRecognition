@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0 — Copyright 2026 Bruno Menon
 // A SoundFont player in plain JavaScript: a performance (performance.js) is
 // rendered to stereo floats, a voice per sample region of each note. A voice
 // has the region's tuning, loop, attenuation, pan, low-pass (opened by the

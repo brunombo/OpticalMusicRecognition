@@ -149,7 +149,9 @@ rhythm F1 (inter-onset intervals) and an OMR-NED-style edit distance.
 
 ## Licenses
 
-App: MIT. copisteria code and copista weights: Apache-2.0 (see `NOTICE` and
+App: MusicOCR's code is MIT (`LICENSES/MusicOCR-MIT.txt`); this fork's
+additions are Apache-2.0 (`LICENSE`), file by file as `NOTICE` lists.
+copisteria code and copista weights: Apache-2.0 (see `NOTICE` and
 `LICENSES/`). Verovio: LGPL-3.0. ONNX Runtime Web: MIT. Sound bank: cut from
 GeneralUser GS by S. Christian Collins, under its own licence
 (`LICENSES/GeneralUser-GS.txt`).

@@ -1,6 +1,18 @@
-MusicOCR
-Copyright 2026 the MusicOCR authors — MIT licence (see README and
-LICENSES/MusicOCR-MIT.txt).
+MusicOCR, with the audio rendering of this fork
+https://github.com/brunombo/OpticalMusicRecognition
+
+Two licences apply, file by file:
+- MusicOCR's code, Copyright 2026 the MusicOCR authors, is under the MIT
+  licence (LICENSES/MusicOCR-MIT.txt);
+  https://github.com/pauldubois98/OpticalMusicRecognition
+- this fork's additions, Copyright 2026 Bruno Menon, are under the Apache
+  License 2.0 (LICENSE): the files that carry an
+  "SPDX-License-Identifier: Apache-2.0" line (src/audio/,
+  src/components/AudioPanel.vue, src/support.js, scripts/licenses/,
+  scripts/soundfont/, tests/audio.test.js, .github/workflows/ci.yml), the
+  documents in docs/, and the fork's changes to MusicOCR files (App.vue,
+  ScoreEditor.vue, render/verovio.js, vite.config.js, the Pages workflow,
+  README, NOTICE); the rest of those files stays under the MIT licence.
 
 This product includes software developed by KobiMusic (https://kobi.music):
 copisteria, https://github.com/kobimusic/copisteria

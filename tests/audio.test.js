@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0 — Copyright 2026 Bruno Menon
 import { describe, expect, it } from "vitest";
 import { parseMidi } from "../scripts/eval/midi.mjs";
 import {

@@ -1,4 +1,5 @@
 <script setup>
+// SPDX-License-Identifier: Apache-2.0 — Copyright 2026 Bruno Menon
 // The score as sound: an instrument, volume and pan for each staff, then
 // listen, or export as MIDI (a track and a program per staff) or WAV (the
 // mix, or a file per staff). The rendering runs in the audio worker.

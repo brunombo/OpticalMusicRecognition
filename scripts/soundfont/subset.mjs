@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0 — Copyright 2026 Bruno Menon
 // Cut a SoundFont bank down to the instruments the app offers.
 //   node scripts/soundfont/subset.mjs <bank.sf2> [out.sf2]
 // Writes public/soundfonts/catalogue.sf2 by default.

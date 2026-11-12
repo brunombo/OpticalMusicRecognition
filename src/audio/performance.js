@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0 — Copyright 2026 Bruno Menon
 // MusicXML as it is played: one line of notes per staff (a part's staves are
 // separate lines), in ticks, with the tempo, time and key signatures. Repeats,
 // endings, da capo and dal segno are unfolded on request.

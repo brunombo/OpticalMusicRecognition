@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0 — Copyright 2026 Bruno Menon
 // The instruments a staff can be given, and what to propose for a staff.
 // `program` is the General MIDI program (0-based); `low` and `high` bound the
 // instrument's usual range (MIDI pitches, approximate: a guide for the

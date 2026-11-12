@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0 — Copyright 2026 Bruno Menon
 // At build time, write THIRD_PARTY_LICENSES.txt into the site: NOTICE, the
 // licences in LICENSES/, then every npm package whose code ends up in the
 // bundle, with its licence files. The list comes from the bundle itself, so

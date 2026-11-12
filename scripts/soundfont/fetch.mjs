@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0 — Copyright 2026 Bruno Menon
 // Fetch the sound bank and cut it down to the app's instruments:
 // GeneralUser GS by S. Christian Collins (its own licence, see
 // LICENSES/GeneralUser-GS.txt), at a pinned commit, into

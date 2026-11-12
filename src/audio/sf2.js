@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0 — Copyright 2026 Bruno Menon
 // SoundFont 2 (SF2) banks: read one, find the samples a note plays, and write
 // one back (used to cut a bank down to the instruments the app offers).
 // Modulators are kept when a bank is rewritten but not played.

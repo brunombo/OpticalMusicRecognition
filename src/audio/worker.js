@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0 — Copyright 2026 Bruno Menon
 // The audio worker: keeps the sound bank, renders performances off the main
 // thread. Messages are { id, type, ... }; replies { id, result } or
 // { id, error }.
